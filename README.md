@@ -8,7 +8,7 @@ go to a shared family calendar.
 
 Built in the open as a product manager portfolio project.
 
-**[Open the live dashboard](https://arunasivaram.github.io/dobbyagent/)**. PRD, eval scorecard, cost comparison, latency, and build progress in one page.
+**[Open the live dashboard](https://arunasivaram.github.io/Dobbyagent/)**. PRD, eval scorecard, cost comparison, latency, and build progress in one page.
 
 Raw PRD in [`docs/PRD.md`](docs/PRD.md). Per module reflection notes in [`LEARNINGS.md`](LEARNINGS.md).
 
