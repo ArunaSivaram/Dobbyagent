@@ -17,6 +17,8 @@ import statistics
 import sys
 import time
 import traceback
+import urllib.error
+import urllib.request
 from dataclasses import asdict, dataclass, field
 from datetime import date
 from pathlib import Path
@@ -25,6 +27,7 @@ from typing import Any
 from dobby.agent import RunResult, run_agent
 from dobby.calendar.base import Event
 from dobby.calendar.fake import InMemoryCalendar
+from dobby.config import OLLAMA_BASE_URL
 from dobby.llm import get_client
 from dobby.llm.base import LLMClient
 from dobby.llm.types import LLMResponse, Message, ToolSchema
@@ -109,6 +112,9 @@ def main() -> int:
     print(f"Loaded {len(cases)} cases from {args.cases}")
     print(f"Model: {args.model} (provider={args.provider}, temperature=0, runs={args.runs})")
     print()
+
+    if args.provider.lower() == "ollama":
+        _preflight_ollama(args.model)
 
     inner = get_client(provider=args.provider, model=args.model, temperature=0.0)
 
@@ -354,6 +360,32 @@ def _run_failed(r: RunScore) -> bool:
 def _load_cases(path: Path) -> list[dict[str, Any]]:
     with path.open() as f:
         return [json.loads(line) for line in f if line.strip()]
+
+
+def _preflight_ollama(model: str) -> None:
+    """Fail fast if Ollama isn't running or the requested model isn't pulled."""
+    # /api/tags lives at the root, not under /v1 (which is OpenAI-compat).
+    root = OLLAMA_BASE_URL.rstrip("/").removesuffix("/v1")
+    tags_url = f"{root}/api/tags"
+    try:
+        with urllib.request.urlopen(tags_url, timeout=5) as resp:
+            tags = json.loads(resp.read().decode())
+    except urllib.error.URLError as e:
+        raise SystemExit(
+            f"Cannot reach Ollama at {tags_url} ({e.reason}). "
+            "Open the Ollama app from Applications and try again."
+        ) from e
+
+    available = {m["name"] for m in tags.get("models", [])}
+    # Accept both "qwen3:8b" and bare "qwen3" (Ollama sometimes normalises).
+    short = model.split(":")[0]
+    if model not in available and not any(a.split(":")[0] == short for a in available):
+        pretty = ", ".join(sorted(available)) or "(none)"
+        raise SystemExit(
+            f"Model {model!r} isn't pulled. Run `ollama pull {model}` first. "
+            f"Available locally: {pretty}"
+        )
+    print(f"Ollama preflight OK — model {model!r} is available.\n")
 
 
 def _parse_args() -> argparse.Namespace:

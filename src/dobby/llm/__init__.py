@@ -18,4 +18,8 @@ def get_client(
         from dobby.llm.anthropic_client import AnthropicClient
 
         return AnthropicClient(model=model, temperature=temperature)
+    if name == "ollama":
+        from dobby.llm.ollama_client import OllamaClient
+
+        return OllamaClient(model=model, temperature=temperature)
     raise ValueError(f"unknown LLM provider: {name!r}")
