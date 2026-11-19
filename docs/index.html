@@ -1,0 +1,678 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Dobby · product plan and live dashboard</title>
+  <meta name="description" content="Dobby is a calendar agent that turns scheduling messages into calendar events. This page is the product plan, the architecture, and the live eval dashboard, all in one." />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <style>
+    :root { font-feature-settings: "ss01", "cv11"; }
+    body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .prose p { text-align: justify; hyphens: auto; }
+    details > summary { cursor: pointer; list-style: none; }
+    details > summary::-webkit-details-marker { display: none; }
+    details > summary::before { content: "▸"; display: inline-block; width: 1.25em; color: #6366f1; transition: transform 0.15s ease; }
+    details[open] > summary::before { transform: rotate(90deg); }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-900 antialiased">
+
+  <!-- Hero -->
+  <header class="bg-gradient-to-br from-indigo-700 to-indigo-900 text-white">
+    <div class="max-w-5xl mx-auto px-6 py-12">
+      <div class="flex items-center gap-3 text-indigo-200 text-sm mono">
+        <span class="inline-block w-2 h-2 rounded-full bg-emerald-400"></span>
+        <span>dobby-agent</span>
+        <span>·</span>
+        <span id="updated-at">updated ,</span>
+      </div>
+      <h1 class="mt-3 text-4xl md:text-5xl font-bold tracking-tight">Dobby</h1>
+      <p class="mt-4 text-lg md:text-xl text-indigo-100 max-w-3xl leading-relaxed">
+        A calendar agent for anyone who gets scheduling messages buried in WhatsApp,
+        email, or group chats. Paste a message. Dates land on your calendar in under
+        fifteen seconds. Reminders arrive a week ahead, two days ahead, and on the
+        day itself. Keep events private, or share them to a family calendar so
+        everyone who needs to see them does.
+      </p>
+      <div class="mt-7 flex flex-wrap gap-3 text-sm">
+        <a href="https://github.com/ArunaSivaram/dobbyagent" class="rounded-md bg-white/10 hover:bg-white/20 px-3 py-1.5 border border-white/20">GitHub repo</a>
+        <a href="https://github.com/ArunaSivaram/dobbyagent/blob/main/docs/PRD.md" class="rounded-md bg-white/10 hover:bg-white/20 px-3 py-1.5 border border-white/20">Raw PRD (markdown)</a>
+        <a href="https://github.com/ArunaSivaram/dobbyagent/blob/main/LEARNINGS.md" class="rounded-md bg-white/10 hover:bg-white/20 px-3 py-1.5 border border-white/20">Learnings log</a>
+      </div>
+    </div>
+  </header>
+
+  <!-- Nav -->
+  <nav class="sticky top-0 z-10 bg-white/90 backdrop-blur border-b border-slate-200 text-sm">
+    <div class="max-w-5xl mx-auto px-6 py-2 flex flex-wrap gap-4 text-slate-600">
+      <a href="#problem" class="hover:text-indigo-700">Problem</a>
+      <a href="#scope" class="hover:text-indigo-700">Scope</a>
+      <a href="#guardrails" class="hover:text-indigo-700">Guardrails</a>
+      <a href="#architecture" class="hover:text-indigo-700">How it works</a>
+      <a href="#evals" class="hover:text-indigo-700">Evals</a>
+      <a href="#cost" class="hover:text-indigo-700">Cost</a>
+      <a href="#performance" class="hover:text-indigo-700">Performance</a>
+      <a href="#progress" class="hover:text-indigo-700">Progress</a>
+      <a href="#risks" class="hover:text-indigo-700">Risks</a>
+    </div>
+  </nav>
+
+  <main class="max-w-5xl mx-auto px-6 py-10 space-y-16">
+
+    <!-- Headline metrics -->
+    <section>
+      <h2 class="text-xs font-semibold uppercase tracking-widest text-slate-500">Headline, latest Claude Haiku 4.5 run</h2>
+      <div id="headline-metrics" class="mt-3 grid grid-cols-2 md:grid-cols-4 gap-4"></div>
+    </section>
+
+    <!-- Problem & solution -->
+    <section id="problem" class="prose">
+      <h2 class="text-2xl font-semibold">Why this exists</h2>
+      <p class="mt-3 text-slate-700 leading-relaxed">
+        Important dates arrive buried in WhatsApp groups, email chains, forwarded
+        school circulars, and group newsletters. Most people retype them into a
+        calendar, or they don't, and something gets missed. The work itself is
+        small but it's constant, and the cost of a single miss, a forgotten
+        appointment, an unpaid fee, a deadline that slipped, is high enough to
+        keep the problem worth solving.
+      </p>
+      <p class="mt-3 text-slate-700 leading-relaxed">
+        A fixed form can't do this, because the inputs are too varied. Messages
+        use relative dates like "next Friday", bundle several events into one
+        block of text, mix deadlines with chit chat, and often restate events
+        already on the calendar. An LLM handles the reading. Tools let it check
+        the calendar before writing to it. The result is a small, private,
+        reversible agent that removes a recurring micro chore without putting
+        anyone's data in motion by accident.
+      </p>
+    </section>
+
+    <!-- Who it's for -->
+    <section>
+      <h2 class="text-2xl font-semibold">Who it's for</h2>
+      <div class="mt-4 grid md:grid-cols-3 gap-4">
+        <div class="rounded-lg border border-slate-200 bg-white p-5">
+          <div class="text-xs font-semibold uppercase tracking-wider text-indigo-700">Primary</div>
+          <div class="mt-1 font-medium">The person doing the organising</div>
+          <p class="mt-2 text-sm text-slate-600 leading-relaxed">Lives in WhatsApp and email, drops dates into a calendar by habit, forgets some of them anyway. Wants to paste once and trust the result.</p>
+        </div>
+        <div class="rounded-lg border border-slate-200 bg-white p-5">
+          <div class="text-xs font-semibold uppercase tracking-wider text-indigo-700">Secondary</div>
+          <div class="mt-1 font-medium">Family or household members</div>
+          <p class="mt-2 text-sm text-slate-600 leading-relaxed">Share the same household schedule. Either get their own Dobby account, or read events off the shared family calendar the primary user chose to write to.</p>
+        </div>
+        <div class="rounded-lg border border-slate-200 bg-white p-5">
+          <div class="text-xs font-semibold uppercase tracking-wider text-indigo-700">Beta user</div>
+          <div class="mt-1 font-medium">Invited by the owner</div>
+          <p class="mt-2 text-sm text-slate-600 leading-relaxed">Needs simple onboarding, a clear privacy note, an easy undo for anything Dobby got wrong.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Scope -->
+    <section id="scope">
+      <h2 class="text-2xl font-semibold">Scope</h2>
+      <div class="mt-4 grid md:grid-cols-2 gap-6">
+        <div class="rounded-lg border border-slate-200 bg-white p-5">
+          <div class="text-xs font-semibold uppercase tracking-wider text-emerald-700">In scope for v1</div>
+          <ul class="mt-3 space-y-2 text-sm text-slate-700">
+            <li>Text messages pasted or forwarded into Telegram.</li>
+            <li>Photos and PDFs of circulars (screenshots, scans, school handouts).</li>
+            <li>Event, deadline, and multi-day extraction with relative dates resolved.</li>
+            <li>Duplicate check before writing to Google Calendar.</li>
+            <li>Reminders at 7 days, 2 days, and on the day, at the user's chosen time.</li>
+            <li>Per-user token and cost tracking with a monthly budget.</li>
+            <li>Invite-only multi-user access, each user linking their own calendar.</li>
+          </ul>
+        </div>
+        <div class="rounded-lg border border-slate-200 bg-white p-5">
+          <div class="text-xs font-semibold uppercase tracking-wider text-slate-500">Out of scope for v1</div>
+          <ul class="mt-3 space-y-2 text-sm text-slate-600">
+            <li>Editing or rescheduling events by chat (v2 candidate).</li>
+            <li>Recurring events as a series. v1 creates the first occurrence and says so.</li>
+            <li>A WhatsApp bot for input (needs Meta Business setup and paid templates).</li>
+            <li>Calendars other than Google (Outlook, iCloud).</li>
+            <li>Public sign up. Google caps unverified apps at 100 users.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- Guardrails -->
+    <section id="guardrails" class="prose">
+      <h2 class="text-2xl font-semibold">Autonomy and guardrails</h2>
+      <p class="mt-3 text-slate-700 leading-relaxed">
+        Dobby acts on its own only for additive, reversible actions. It creates
+        events in the user's own calendar and messages that one user. It never
+        edits or deletes anything it didn't create, and it never contacts anyone
+        else. Every write is undoable with <span class="mono">/undo</span>. A
+        message that would create more than ten events switches to confirm mode.
+      </p>
+      <div class="mt-5 overflow-x-auto rounded-lg border border-slate-200 bg-white">
+        <table class="w-full text-sm">
+          <thead class="bg-slate-50 text-slate-600 text-left text-xs uppercase tracking-wider">
+            <tr>
+              <th class="px-4 py-3">Boundary</th>
+              <th class="px-4 py-3">Rule</th>
+              <th class="px-4 py-3">Enforced by</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-100">
+            <tr><td class="px-4 py-3 font-medium">Tool allowlist</td><td class="px-4 py-3 text-slate-700">Only <span class="mono">list_events</span> and <span class="mono">create_event</span> are exposed to the model.</td><td class="px-4 py-3 text-slate-500">Code, tool list</td></tr>
+            <tr><td class="px-4 py-3 font-medium">Write scope</td><td class="px-4 py-3 text-slate-700">Deletes only through <span class="mono">/undo</span>, and only on events tagged <span class="mono">dobby=1</span>.</td><td class="px-4 py-3 text-slate-500">Code, delete path check</td></tr>
+            <tr><td class="px-4 py-3 font-medium">Pasted text and files</td><td class="px-4 py-3 text-slate-700">Treated as data. Instructions inside text, photos, or PDFs are ignored.</td><td class="px-4 py-3 text-slate-500">System prompt + injection evals</td></tr>
+            <tr><td class="px-4 py-3 font-medium">Loop limit</td><td class="px-4 py-3 text-slate-700">At most 8 model calls per message.</td><td class="px-4 py-3 text-slate-500">Code, <span class="mono">MAX_STEPS</span></td></tr>
+            <tr><td class="px-4 py-3 font-medium">Volume</td><td class="px-4 py-3 text-slate-700">At most 10 events per message without confirmation; 50 messages per user per day.</td><td class="px-4 py-3 text-slate-500">Code, pre-tool guard</td></tr>
+            <tr><td class="px-4 py-3 font-medium">Spend</td><td class="px-4 py-3 text-slate-700">Monthly budget per user (default $0.50). Paused at 100%, warned at 80%.</td><td class="px-4 py-3 text-slate-500">Code, budget check per run</td></tr>
+            <tr><td class="px-4 py-3 font-medium">Access</td><td class="px-4 py-3 text-slate-700">Invite code required. Unknown Telegram users get no model call.</td><td class="px-4 py-3 text-slate-500">Code, allowlist lookup first</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Architecture -->
+    <section id="architecture" class="prose">
+      <h2 class="text-2xl font-semibold">How it works</h2>
+      <p class="mt-3 text-slate-700 leading-relaxed">
+        Dobby is a ReAct loop. The LLM reasons about the message, asks for a tool,
+        the loop runs the tool, hands the result back, and the loop repeats until
+        the model says it's done. The loop never imports a provider SDK. Both the
+        LLM side and the calendar side sit behind small interfaces, which is why
+        the same agent code runs against Claude in production and against a fake
+        calendar in evals, without a line of change.
+      </p>
+      <pre class="mt-5 rounded-lg bg-slate-900 text-slate-100 p-5 text-xs md:text-sm overflow-x-auto"><code>  pasted message
+        │
+        ▼
+  ┌──────────────────── run_agent() ────────────────────┐
+  │   while step &lt; MAX_STEPS = 8:                       │
+  │     response = client.complete(system, msgs, tools) │──► LLMClient port
+  │     if response.stop == "end": return reply         │     ├─ AnthropicClient  (Claude Haiku 4.5)
+  │     for tc in response.tool_calls:                  │     └─ OllamaClient     (Qwen3:8b, local)
+  │       results.append(run_tool(tc, calendar))        │
+  │     msgs += [assistant_turn, user_tool_results]     │──► CalendarPort
+  └─────────────────────────────────────────────────────┘     ├─ InMemoryCalendar (tests, evals)
+                                                              └─ GoogleCalendar   (Module 3, production)</code></pre>
+    </section>
+
+    <!-- Evals -->
+    <section id="evals" class="prose">
+      <h2 class="text-2xl font-semibold">Evals and release gate</h2>
+      <p class="mt-3 text-slate-700 leading-relaxed">
+        Every model ships only when it clears every row in the scorecard below.
+        The golden set has thirty text cases across ten categories, covering
+        single events, multi event messages, relative dates, deadlines, multi
+        day events, chit chat, duplicates, ambiguous phrasing, prompt injection,
+        and messy formatting. Each case runs three times against a fresh fake
+        calendar. The mean across runs is scored against a fixed threshold.
+        Code graders only, no LLM judge yet.
+      </p>
+      <div id="scorecard" class="mt-5 grid md:grid-cols-2 gap-6"></div>
+    </section>
+
+    <!-- Cost -->
+    <section id="cost" class="prose">
+      <h2 class="text-2xl font-semibold">Cost comparison</h2>
+      <p class="mt-3 text-slate-700 leading-relaxed">
+        Dobby runs cheap. Every Claude call is logged with its exact token
+        counts, costed from the published price table, and summed into per run,
+        per user, and per month totals. The monthly budget per user defaults to
+        $0.50. The sections below show the headline numbers and the full math.
+      </p>
+      <div class="mt-5 rounded-lg border border-slate-200 bg-white p-6">
+        <canvas id="cost-chart" height="110"></canvas>
+      </div>
+      <div class="mt-6 space-y-3">
+        <details class="rounded-lg border border-slate-200 bg-white p-5">
+          <summary class="font-semibold">How we calculate the cost per message</summary>
+          <div class="mt-3 text-sm text-slate-700 space-y-3 leading-relaxed">
+            <p>Every call to Claude returns four token counts in <span class="mono">response.usage</span>: input tokens, output tokens, cache read tokens, and cache write tokens. Each is multiplied by the per million token price for its model, then summed and divided by one million.</p>
+            <pre class="rounded-md bg-slate-50 p-3 text-xs mono overflow-x-auto">cost = (0.10 * input + 0.50 * output + 0.01 * cache_read + 0.125 * cache_write) / 1_000_000</pre>
+            <p>One run (one message) has several calls because of the tool loop, so the run cost is the sum of its calls. Ollama runs are local, so cost is always $0.</p>
+          </div>
+        </details>
+        <details class="rounded-lg border border-slate-200 bg-white p-5">
+          <summary class="font-semibold">Price table (per million tokens)</summary>
+          <div class="mt-3 overflow-x-auto">
+            <table class="w-full text-sm">
+              <thead class="text-left text-xs uppercase tracking-wider text-slate-500">
+                <tr><th class="py-2">Model</th><th class="py-2 text-right">Input</th><th class="py-2 text-right">Output</th><th class="py-2 text-right">Cache read</th><th class="py-2 text-right">Cache write</th></tr>
+              </thead>
+              <tbody class="divide-y divide-slate-100">
+                <tr><td class="py-2 mono">claude-haiku-4-5-20251001</td><td class="py-2 text-right mono">$0.10</td><td class="py-2 text-right mono">$0.50</td><td class="py-2 text-right mono">$0.01</td><td class="py-2 text-right mono">$0.125</td></tr>
+                <tr><td class="py-2 mono">claude-sonnet-4-6 (eval judge)</td><td class="py-2 text-right mono">$2.00</td><td class="py-2 text-right mono">$10.00</td><td class="py-2 text-right mono">$0.10</td><td class="py-2 text-right mono">$2.50</td></tr>
+                <tr><td class="py-2 mono">qwen3:8b via Ollama</td><td class="py-2 text-right mono text-emerald-700" colspan="4">$0.00 (local inference on the user's Mac)</td></tr>
+              </tbody>
+            </table>
+            <p class="mt-2 text-xs text-slate-500">Prices are stored in a <span class="mono">model_prices</span> table with an <span class="mono">effective_from</span> date, so old rows keep the price they were billed at.</p>
+          </div>
+        </details>
+        <details class="rounded-lg border border-slate-200 bg-white p-5">
+          <summary class="font-semibold">Monthly budget math</summary>
+          <div class="mt-3 text-sm text-slate-700 space-y-3 leading-relaxed">
+            <p>At the measured $0.0005 per message on Haiku, a user sending sixty messages in a month costs about $0.03. Default budget is $0.50, which leaves room for photos and PDFs (roughly 2x text cost).</p>
+            <p>Before each run, the service sums this month's <span class="mono">cost_usd</span> for the user. At 80 percent of budget, a one line warning is appended to the reply. At 100 percent, Dobby pauses. No model call fires, and a polite message goes back.</p>
+            <p>A hard monthly spend limit is also set in the Anthropic Console as a backstop above the per user guard.</p>
+          </div>
+        </details>
+        <details class="rounded-lg border border-slate-200 bg-white p-5">
+          <summary class="font-semibold">Why pay for Haiku when Qwen is free?</summary>
+          <div class="mt-3 text-sm text-slate-700 space-y-3 leading-relaxed">
+            <p>Qwen3:8b running locally has two things going for it: zero per message cost, and nothing leaves the user's machine. Haiku 4.5 has two things going for it: strong tool use and consistent instruction following on long system prompts.</p>
+            <p>The comparison in the scorecard above decides this empirically. If Qwen3:8b clears every threshold, we can offer a "no cloud" mode without a feature trade. If not, the gap on each metric is the shopping list of what to fix (prompt, bigger open model, or hosted open model).</p>
+          </div>
+        </details>
+      </div>
+    </section>
+
+    <!-- Performance -->
+    <section id="performance" class="prose">
+      <h2 class="text-2xl font-semibold">Latency performance</h2>
+      <p class="mt-3 text-slate-700 leading-relaxed">
+        The target is a reply within fifteen seconds for 95 percent of
+        messages, with a "typing" indicator inside one second. The table below
+        is mean latency per run grouped by eval category. The "no date"
+        category ends in one model call, so it's the fastest. Multi event
+        messages run the tool loop three times.
+      </p>
+      <div class="mt-5 overflow-x-auto rounded-lg border border-slate-200 bg-white">
+        <table class="w-full text-sm">
+          <thead class="bg-slate-50 text-slate-600 text-left text-xs uppercase tracking-wider">
+            <tr>
+              <th class="px-4 py-3">Category</th>
+              <th class="px-4 py-3 text-right">Haiku 4.5</th>
+              <th class="px-4 py-3 text-right">Qwen3:8b</th>
+            </tr>
+          </thead>
+          <tbody id="latency-tbody" class="divide-y divide-slate-100"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Build progress -->
+    <section id="progress" class="prose">
+      <h2 class="text-2xl font-semibold">Build progress</h2>
+      <p class="mt-3 text-slate-700 leading-relaxed">
+        Ten modules, one sitting each. Every module ends with something that
+        runs, a test, and a commit. Evals come in Module 2, before any real
+        integration, so every later change can be measured against them.
+      </p>
+      <ol id="modules" class="mt-5 space-y-2"></ol>
+    </section>
+
+    <!-- Risks -->
+    <section id="risks" class="prose">
+      <h2 class="text-2xl font-semibold">Risks and open questions</h2>
+      <p class="mt-3 text-slate-700 leading-relaxed">
+        The biggest risk is a silent wrong date. A confident event on the wrong
+        day is worse than no event at all. The three defences are the eval gate
+        above, the agent's reply stating its assumptions out loud, and the
+        <span class="mono">/undo</span> command.
+      </p>
+      <div class="mt-5 overflow-x-auto rounded-lg border border-slate-200 bg-white">
+        <table class="w-full text-sm">
+          <thead class="bg-slate-50 text-slate-600 text-left text-xs uppercase tracking-wider">
+            <tr>
+              <th class="px-4 py-3">Risk</th>
+              <th class="px-4 py-3">Impact</th>
+              <th class="px-4 py-3">Mitigation</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-100">
+            <tr><td class="px-4 py-3">Wrong date or time created</td><td class="px-4 py-3 text-slate-600">Missed or false commitments</td><td class="px-4 py-3 text-slate-600">Eval gate at 95%+, assumptions in the reply, <span class="mono">/undo</span>, weekly undo review</td></tr>
+            <tr><td class="px-4 py-3">Misread photo (blur, angle, small print)</td><td class="px-4 py-3 text-slate-600">Wrong or missing events</td><td class="px-4 py-3 text-slate-600">Transcript stored per run; asks for a clearer photo when unsure</td></tr>
+            <tr><td class="px-4 py-3">Prompt injection in forwarded text or files</td><td class="px-4 py-3 text-slate-600">Unwanted events or calls</td><td class="px-4 py-3 text-slate-600">Two tool allowlist, event cap, injection evals at 100 percent</td></tr>
+            <tr><td class="px-4 py-3">Cost spike (loops, large PDFs)</td><td class="px-4 py-3 text-slate-600">Unexpected bill</td><td class="px-4 py-3 text-slate-600"><span class="mono">MAX_STEPS</span>, 5 page file limit, budget guard, console spend cap</td></tr>
+            <tr><td class="px-4 py-3">Storing message content and circulars</td><td class="px-4 py-3 text-slate-600">Privacy and trust</td><td class="px-4 py-3 text-slate-600">30 day retention, private storage, encryption, <span class="mono">/delete_me</span>, privacy note</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="border-t border-slate-200 bg-white">
+    <div class="max-w-5xl mx-auto px-6 py-6 text-xs text-slate-500 flex flex-wrap items-center justify-between gap-3">
+      <span>Regenerated from <span class="mono">evals/results/*.json</span> by <span class="mono">scripts/update_dashboard.py</span></span>
+      <span>Built in the open at <a class="underline hover:text-slate-700" href="https://github.com/ArunaSivaram/dobbyagent">github.com/ArunaSivaram/dobbyagent</a></span>
+    </div>
+  </footer>
+
+  <!-- Data block: replaced by scripts/update_dashboard.py -->
+  <script id="eval-data" type="application/json">
+{
+  "updated_at": "2026-11-19 05:38 UTC",
+  "thresholds": {
+    "date_time_accuracy": 0.95,
+    "event_recall": 0.95,
+    "event_precision": 0.95,
+    "duplicate_avoidance": 1.0,
+    "tool_trajectory": 0.95,
+    "injection_safety": 1.0
+  },
+  "models": [
+    {
+      "id": "claude-haiku-4-5-20251001",
+      "provider": "anthropic",
+      "status": "measured",
+      "runs_per_case": 3,
+      "case_count": 30,
+      "total_cost_usd": 0.0421,
+      "cost_per_message_usd": 0.0004681811111111111,
+      "latency_ms_p50": 3534.5,
+      "latency_ms_p95": 5528.1,
+      "scores": {
+        "date_time_accuracy": 0.9777777777777777,
+        "event_recall": 0.9888888888888889,
+        "event_precision": 0.9688888888888889,
+        "duplicate_avoidance": 0.8888888888888888,
+        "tool_trajectory": 1.0,
+        "injection_safety": 1.0
+      },
+      "thresholds_passed": 5,
+      "by_category": {
+        "ambiguous": {
+          "mean_latency_ms": 3401.3333333333335,
+          "mean_cost_usd": 0.0004973888888888889
+        },
+        "deadline": {
+          "mean_latency_ms": 3419.6666666666665,
+          "mean_cost_usd": 0.00047233333333333334
+        },
+        "duplicate": {
+          "mean_latency_ms": 2388.5555555555557,
+          "mean_cost_usd": 0.0003332777777777778
+        },
+        "injection": {
+          "mean_latency_ms": 3951.3333333333335,
+          "mean_cost_usd": 0.0005155444444444445
+        },
+        "messy": {
+          "mean_latency_ms": 4262.111111111111,
+          "mean_cost_usd": 0.0005392888888888889
+        },
+        "multiday": {
+          "mean_latency_ms": 3838.1111111111113,
+          "mean_cost_usd": 0.0005361888888888889
+        },
+        "multiple": {
+          "mean_latency_ms": 4380,
+          "mean_cost_usd": 0.000606588888888889
+        },
+        "none": {
+          "mean_latency_ms": 1694.6666666666667,
+          "mean_cost_usd": 0.00016015555555555557
+        },
+        "relative": {
+          "mean_latency_ms": 4174.888888888889,
+          "mean_cost_usd": 0.000509988888888889
+        },
+        "single": {
+          "mean_latency_ms": 3719.6666666666665,
+          "mean_cost_usd": 0.0005110555555555556
+        }
+      }
+    },
+    {
+      "id": "qwen3:8b",
+      "provider": "ollama",
+      "status": "measured",
+      "runs_per_case": 3,
+      "case_count": 30,
+      "total_cost_usd": 0.0,
+      "cost_per_message_usd": 0.0,
+      "latency_ms_p50": 28846.0,
+      "latency_ms_p95": 74867.4,
+      "scores": {
+        "date_time_accuracy": 0.8666666666666667,
+        "event_recall": 0.9,
+        "event_precision": 0.8611111111111112,
+        "duplicate_avoidance": 1.0,
+        "tool_trajectory": 0.9444444444444444,
+        "injection_safety": 0.3333333333333333
+      },
+      "thresholds_passed": 1,
+      "by_category": {
+        "ambiguous": {
+          "mean_latency_ms": 42168.333333333336,
+          "mean_cost_usd": 0.0
+        },
+        "deadline": {
+          "mean_latency_ms": 25600.444444444445,
+          "mean_cost_usd": 0.0
+        },
+        "duplicate": {
+          "mean_latency_ms": 30754.666666666668,
+          "mean_cost_usd": 0.0
+        },
+        "injection": {
+          "mean_latency_ms": 35493.88888888889,
+          "mean_cost_usd": 0.0
+        },
+        "messy": {
+          "mean_latency_ms": 30402.666666666668,
+          "mean_cost_usd": 0.0
+        },
+        "multiday": {
+          "mean_latency_ms": 37070.666666666664,
+          "mean_cost_usd": 0.0
+        },
+        "multiple": {
+          "mean_latency_ms": 48411.333333333336,
+          "mean_cost_usd": 0.0
+        },
+        "none": {
+          "mean_latency_ms": 9666.777777777777,
+          "mean_cost_usd": 0.0
+        },
+        "relative": {
+          "mean_latency_ms": 51519.11111111111,
+          "mean_cost_usd": 0.0
+        },
+        "single": {
+          "mean_latency_ms": 20890.666666666668,
+          "mean_cost_usd": 0.0
+        }
+      }
+    }
+  ],
+  "modules": [
+    {
+      "id": 0,
+      "name": "Setup",
+      "status": "done"
+    },
+    {
+      "id": 1,
+      "name": "Agent core",
+      "status": "done"
+    },
+    {
+      "id": 2,
+      "name": "Evals + Ollama",
+      "status": "in_progress"
+    },
+    {
+      "id": 3,
+      "name": "Google Calendar",
+      "status": "todo"
+    },
+    {
+      "id": 4,
+      "name": "Telegram + files",
+      "status": "todo"
+    },
+    {
+      "id": 5,
+      "name": "Data + cost",
+      "status": "todo"
+    },
+    {
+      "id": 6,
+      "name": "Reminders",
+      "status": "todo"
+    },
+    {
+      "id": 7,
+      "name": "Multi-user",
+      "status": "todo"
+    },
+    {
+      "id": 8,
+      "name": "Ship",
+      "status": "todo"
+    },
+    {
+      "id": 9,
+      "name": "Launch",
+      "status": "todo"
+    }
+  ]
+}
+  </script>
+
+  <script>
+    (() => {
+      const data = JSON.parse(document.getElementById('eval-data').textContent);
+      const $ = (id) => document.getElementById(id);
+
+      $('updated-at').textContent = 'updated ' + data.updated_at;
+
+      const pct = (v) => (v == null ? ', ' : (v * 100).toFixed(1) + '%');
+      const dollars = (v) => (v == null ? ', ' : '$' + v.toFixed(6));
+      const ms = (v) => (v == null ? ', ' : Math.round(v).toLocaleString() + ' ms');
+      const passFail = (v, threshold) => {
+        if (v == null) return { label: 'measuring', cls: 'bg-slate-100 text-slate-600' };
+        return v >= threshold
+          ? { label: 'pass',   cls: 'bg-emerald-100 text-emerald-800' }
+          : { label: 'fail',   cls: 'bg-rose-100 text-rose-800' };
+      };
+      const statusPill = (status) => {
+        const map = {
+          measured:  { label: 'measured',  cls: 'bg-emerald-100 text-emerald-800' },
+          measuring: { label: 'measuring', cls: 'bg-amber-100 text-amber-800' },
+          done:      { label: 'done',      cls: 'bg-emerald-100 text-emerald-800' },
+          in_progress: { label: 'in progress', cls: 'bg-amber-100 text-amber-800' },
+          todo:      { label: 'todo',      cls: 'bg-slate-100 text-slate-500' },
+        };
+        const s = map[status] || map.todo;
+        return `<span class="inline-block text-[11px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded ${s.cls}">${s.label}</span>`;
+      };
+
+      // Headline metrics (Haiku)
+      const headline = $('headline-metrics');
+      const haiku = (data.models || []).find(m => m.id.startsWith('claude'));
+      const metrics = haiku ? [
+        { label: 'Date / time accuracy', value: pct(haiku.scores.date_time_accuracy) },
+        { label: 'Cost per message',    value: dollars(haiku.cost_per_message_usd) },
+        { label: 'Latency p95',         value: ms(haiku.latency_ms_p95) },
+        { label: 'Injection safety',    value: pct(haiku.scores.injection_safety) },
+      ] : [
+        { label: 'Date / time accuracy', value: ', ' },
+        { label: 'Cost per message',    value: ', ' },
+        { label: 'Latency p95',         value: ', ' },
+        { label: 'Injection safety',    value: ', ' },
+      ];
+      headline.innerHTML = metrics.map(m => `
+        <div class="rounded-lg border border-slate-200 bg-white p-4">
+          <div class="text-xs text-slate-500 uppercase tracking-wider">${m.label}</div>
+          <div class="mt-1 text-2xl font-semibold mono">${m.value}</div>
+        </div>
+      `).join('');
+
+      // Scorecard, one card per model
+      const scorecard = $('scorecard');
+      scorecard.innerHTML = (data.models || []).map(m => {
+        const rows = Object.entries(data.thresholds).map(([metric, threshold]) => {
+          const v = m.scores[metric];
+          const pf = passFail(v, threshold);
+          return `
+            <tr>
+              <td class="px-4 py-2">${metric.replace(/_/g, ' ')}</td>
+              <td class="px-4 py-2 mono text-right">${v == null ? ', ' : (v * 100).toFixed(1) + '%'}</td>
+              <td class="px-4 py-2 mono text-right text-slate-500">${(threshold * 100).toFixed(0)}%</td>
+              <td class="px-4 py-2 text-right">
+                <span class="inline-block text-[11px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded ${pf.cls}">${pf.label}</span>
+              </td>
+            </tr>
+          `;
+        }).join('');
+        return `
+          <div class="rounded-lg border border-slate-200 bg-white overflow-hidden">
+            <div class="px-4 py-3 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
+              <span class="font-semibold mono text-sm">${m.id}</span>
+              ${statusPill(m.status)}
+            </div>
+            <table class="w-full text-sm">
+              <thead class="text-xs uppercase tracking-wider text-slate-500 text-left">
+                <tr>
+                  <th class="px-4 py-2">Metric</th>
+                  <th class="px-4 py-2 text-right">Mean</th>
+                  <th class="px-4 py-2 text-right">Threshold</th>
+                  <th class="px-4 py-2 text-right">Verdict</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-100">${rows}</tbody>
+            </table>
+          </div>
+        `;
+      }).join('') || `<p class="text-slate-500">No model results yet.</p>`;
+
+      // Cost chart
+      const costCanvas = $('cost-chart');
+      if (costCanvas && (data.models || []).length > 0) {
+        new Chart(costCanvas, {
+          type: 'bar',
+          data: {
+            labels: data.models.map(m => m.id),
+            datasets: [{
+              label: 'US$ per message',
+              data: data.models.map(m => m.cost_per_message_usd || 0),
+              backgroundColor: data.models.map(m => m.provider === 'anthropic' ? '#4f46e5' : '#10b981'),
+              borderRadius: 4,
+            }],
+          },
+          options: {
+            indexAxis: 'y',
+            responsive: true,
+            plugins: { legend: { display: false } },
+            scales: {
+              x: {
+                beginAtZero: true,
+                ticks: { callback: (v) => '$' + Number(v).toFixed(4) },
+              },
+            },
+          },
+        });
+      }
+
+      // Latency by category
+      const latBody = $('latency-tbody');
+      const cats = new Set();
+      (data.models || []).forEach(m => Object.keys(m.by_category || {}).forEach(c => cats.add(c)));
+      const catsSorted = [...cats].sort();
+      const latHaiku = (data.models || []).find(m => m.id.startsWith('claude')) || {};
+      const latQwen  = (data.models || []).find(m => m.id.startsWith('qwen'))   || {};
+      latBody.innerHTML = catsSorted.map(c => `
+        <tr>
+          <td class="px-4 py-2 capitalize">${c}</td>
+          <td class="px-4 py-2 mono text-right">${ms(latHaiku.by_category?.[c]?.mean_latency_ms)}</td>
+          <td class="px-4 py-2 mono text-right">${ms(latQwen.by_category?.[c]?.mean_latency_ms)}</td>
+        </tr>
+      `).join('') || `<tr><td class="px-4 py-6 text-slate-500" colspan="3">No category data yet.</td></tr>`;
+
+      // Modules
+      $('modules').innerHTML = (data.modules || []).map(m => `
+        <li class="flex items-center gap-3 rounded-md border border-slate-200 bg-white px-4 py-2">
+          <span class="mono text-xs text-slate-500 w-10">M${m.id}</span>
+          <span class="flex-1">${m.name}</span>
+          ${statusPill(m.status)}
+        </li>
+      `).join('');
+    })();
+  </script>
+</body>
+</html>
