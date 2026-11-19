@@ -17,8 +17,12 @@ lint: unhide
 
 check: lint test
 
-eval:
-	@echo "eval harness not built yet (Module 2)"
+MODEL ?= claude-haiku-4-5-20251001
+PROVIDER ?= anthropic
+RUNS ?= 3
+
+eval: unhide
+	uv run --no-sync python -m evals.run_evals --model $(MODEL) --provider $(PROVIDER) --runs $(RUNS)
 
 run: unhide
 	uv run --no-sync python $(ARGS)

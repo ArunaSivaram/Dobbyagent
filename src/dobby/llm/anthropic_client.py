@@ -39,9 +39,20 @@ MAX_TOKENS = 1024
 
 
 class AnthropicClient:
-    """Satisfies the LLMClient protocol by wrapping anthropic.Anthropic."""
+    """Satisfies the LLMClient protocol by wrapping anthropic.Anthropic.
 
-    def __init__(self, api_key: str | None = None, model: str | None = None) -> None:
+    Note on temperature: Anthropic's v2 Messages API (SDK ≥ 2.x, Claude 4.x
+    models) removed the `temperature` parameter. The constructor accepts it
+    for signature uniformity with other adapters (e.g. Ollama), but ignores
+    it. For evals we rely on multi-run averaging to control variance.
+    """
+
+    def __init__(
+        self,
+        api_key: str | None = None,
+        model: str | None = None,
+        temperature: float | None = None,
+    ) -> None:
         self._client = Anthropic(api_key=api_key or ANTHROPIC_API_KEY)
         self._model = model or LLM_MODEL
 

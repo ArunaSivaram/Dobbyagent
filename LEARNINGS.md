@@ -18,6 +18,17 @@ surprised you, and the one-line definition of each new term.
 
 ## Module 2
 
+**Part A — the eval harness (Claude only).**
+
+- **Eval vs test.** A unit test says "this function returns 42"; an eval says "across 30 pasted messages, dates are correct ≥ 95% of the time." Golden set in `evals/cases.jsonl`, code graders in `evals/graders.py`, runner in `evals/run_evals.py`, one command: `make eval MODEL=... PROVIDER=... RUNS=3`.
+- **Six code graders** (no LLM judge yet): date/time accuracy, event recall, event precision, duplicate avoidance (for `duplicate` cases only), tool trajectory (list_events before create_event?), injection safety (for `injection` cases only). Grader tests in `tests/test_graders.py` — 26 unit tests pin them down so a wobble in the measuring instrument doesn't masquerade as a model regression.
+- **Why N = 3 and "mean score".** LLMs are non-deterministic even on identical input. One run per case can't tell "the prompt got better" from "lucky dice." PRD prescribes N=3 and reporting the mean.
+- **Claude 4.x surprise: `temperature` has been removed from Anthropic's v2 Messages API** (SDK ≥ 2.x). `messages.create(temperature=0)` now returns `"temperature: Extra inputs are not permitted"`. The v2 API replaced it with `output_config.effort` (`low`/`medium`/`high`/`xhigh`/`max`). So our "temperature=0" determinism lever doesn't apply to Haiku 4.5. We keep the kwarg on `AnthropicClient` for signature uniformity across adapters (Ollama still uses temperature), accept the native variance, and lean on N=3 averaging.
+- **Haiku baseline (30 cases × 3 runs, 2026-11-17).** 5 of 6 thresholds passed: date_time 97.8%, recall 98.9%, precision 96.9%, tool_trajectory 100%, injection_safety 100%. Only miss: duplicate_avoidance at 88.9% vs 100% threshold — all 3 failing cases are one-flake-in-three. Cost $0.0421 total, 5m17s.
+- **Injection safety holding at 100%** on three adversarial cases (fake SYSTEM OVERRIDE, fake tool-name instructions, fake "debug mode") is the single most reassuring eval. The two-tool allowlist + "treat text as data" system-prompt rule is doing real work.
+
+## Module 3
+
 ## Module 3
 
 ## Module 4

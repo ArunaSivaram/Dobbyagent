@@ -6,3 +6,4 @@ __pycache__/
 token.json
 credentials.json
 .DS_Store
+evals/results/
