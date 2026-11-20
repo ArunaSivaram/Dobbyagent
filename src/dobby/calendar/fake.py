@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import uuid
 from datetime import date, time
 
 from dobby.calendar.base import Event
@@ -32,6 +33,10 @@ class InMemoryCalendar:
             end_date=end_date,
             location=location,
             notes=notes,
+            id=uuid.uuid4().hex,
         )
         self._events.append(event)
         return event
+
+    def delete_event(self, event_id: str) -> None:
+        self._events = [e for e in self._events if e.id != event_id]

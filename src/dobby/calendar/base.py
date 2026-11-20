@@ -14,6 +14,7 @@ class Event:
     end_date: date | None = None
     location: str | None = None
     notes: str | None = None
+    id: str | None = None
 
 
 class CalendarPort(Protocol):
@@ -29,3 +30,5 @@ class CalendarPort(Protocol):
         location: str | None = None,
         notes: str | None = None,
     ) -> Event: ...
+
+    def delete_event(self, event_id: str) -> None: ...

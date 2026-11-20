@@ -1,6 +1,6 @@
 PTH_FILES := .venv/lib/python3.12/site-packages/*.pth
 
-.PHONY: setup unhide test lint check eval run dobby
+.PHONY: setup unhide test lint check eval run dobby bot
 
 setup:
 	uv sync
@@ -29,3 +29,6 @@ run: unhide
 
 dobby: unhide
 	uv run --no-sync python -m dobby $(ARGS)
+
+bot: unhide
+	uv run --no-sync python -m dobby.telegram.bot

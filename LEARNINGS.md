@@ -52,6 +52,15 @@ surprised you, and the one-line definition of each new term.
 
 ## Module 4
 
+**Part A — Telegram bot (text), allowlist, `/upcoming`, `/undo`.** Photos/PDFs deferred to Part B.
+
+- **The adapter pattern pays off a second time.** `agent.py`, `GoogleCalendar`, and every eval ran unchanged. The bot is three async wrappers in `telegram/bot.py` around three pure functions in `telegram/handlers.py`. Pure functions = testable without any Telegram library at all (10 new unit tests, no mocks of `python-telegram-bot` internals).
+- **Polling > webhook, for now.** Bot calls `getUpdates` every ~10s over HTTPS. No public URL needed, so I can run the bot from my laptop while developing. Webhook comes in Module 7/8 when we deploy and want push-not-pull delivery.
+- **Default timeouts are optimistic.** python-telegram-bot's 5s read timeout was too tight for the initial `getMe` handshake from Singapore. Bumped to 30s / 40s (long-poll read must exceed the server's polling window, default 10s). Lesson: any library that wraps HTTPX needs you to think about timeouts for your actual network, not localhost defaults.
+- **Per-chat `/undo` state is a dict, not a database.** `_last_run_ids: dict[chat_id, list[str]]` lives in process memory, overwritten on each new text run. Lost on bot restart — acceptable for v1 per PRD; durable undo is Module 5. The `dobby=1` tag from Module 3 isn't used yet, but Module 5 will query by it for cross-restart undo.
+- **Event.id is optional but load-bearing.** Added `id: str | None = None` to the `Event` dataclass. `GoogleCalendar.create_event` now captures the server-assigned ID from the insert response and returns an Event with it set. In-memory calendar generates a UUID. Default of `None` meant every existing call site (agent, tests, evals) kept working — 79 tests stayed green through the change.
+- **Live test: paste → calendar → `/upcoming` sees it → `/undo` removes it.** Round-trip works from my phone. First real multi-device thing in the project.
+
 ## Module 4b
 
 ## Module 5

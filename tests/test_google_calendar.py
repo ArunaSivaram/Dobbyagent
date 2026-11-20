@@ -21,6 +21,7 @@ class _FakeEventsResource:
         self.list_payload = list_payload
         self.list_kwargs: dict[str, Any] | None = None
         self.insert_kwargs: dict[str, Any] | None = None
+        self.delete_kwargs: dict[str, Any] | None = None
 
     def list(self, **kwargs: Any) -> _FakeExecute:
         self.list_kwargs = kwargs
@@ -29,6 +30,10 @@ class _FakeEventsResource:
     def insert(self, **kwargs: Any) -> _FakeExecute:
         self.insert_kwargs = kwargs
         return _FakeExecute({"id": "created-id"})
+
+    def delete(self, **kwargs: Any) -> _FakeExecute:
+        self.delete_kwargs = kwargs
+        return _FakeExecute(None)
 
 
 class _FakeService:
@@ -158,6 +163,27 @@ def test_create_event_calls_insert_with_tagged_body():
     body = insert_kwargs["body"]
     assert body["summary"] == "Sports Day"
     assert body["extendedProperties"]["private"]["dobby"] == "1"
+
+
+def test_create_event_captures_server_assigned_id():
+    service = _FakeService()
+    cal = GoogleCalendar(service=service, calendar_id="primary")
+
+    event = cal.create_event(title="Sports Day", date=date(2026, 11, 14))
+
+    assert event.id == "created-id"
+
+
+def test_delete_event_calls_google_delete():
+    service = _FakeService()
+    cal = GoogleCalendar(service=service, calendar_id="primary")
+
+    cal.delete_event("abc-123")
+
+    delete_kwargs = service._events_resource.delete_kwargs
+    assert delete_kwargs is not None
+    assert delete_kwargs["calendarId"] == "primary"
+    assert delete_kwargs["eventId"] == "abc-123"
 
 
 def test_list_events_passes_window_and_parses_items():

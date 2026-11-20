@@ -31,7 +31,7 @@ MODULES: list[dict[str, object]] = [
     {"id": 1, "name": "Agent core",       "status": "done"},
     {"id": 2, "name": "Evals + Ollama",   "status": "done"},
     {"id": 3, "name": "Google Calendar",  "status": "done"},
-    {"id": 4, "name": "Telegram + files", "status": "todo"},
+    {"id": 4, "name": "Telegram + files", "status": "in_progress"},
     {"id": 5, "name": "Data + cost",      "status": "todo"},
     {"id": 6, "name": "Reminders",        "status": "todo"},
     {"id": 7, "name": "Multi-user",       "status": "todo"},

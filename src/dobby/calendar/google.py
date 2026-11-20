@@ -68,8 +68,26 @@ class GoogleCalendar:
             notes=notes,
         )
         body = _to_google(event)
-        self._service.events().insert(calendarId=self._calendar_id, body=body).execute()
-        return event
+        response = (
+            self._service.events()
+            .insert(calendarId=self._calendar_id, body=body)
+            .execute()
+        )
+        return Event(
+            title=event.title,
+            date=event.date,
+            start_time=event.start_time,
+            end_time=event.end_time,
+            end_date=event.end_date,
+            location=event.location,
+            notes=event.notes,
+            id=response.get("id"),
+        )
+
+    def delete_event(self, event_id: str) -> None:
+        self._service.events().delete(
+            calendarId=self._calendar_id, eventId=event_id
+        ).execute()
 
 
 def _to_google(event: Event) -> dict[str, Any]:
@@ -101,6 +119,7 @@ def _from_google(item: dict[str, Any]) -> Event:
     title = item.get("summary", "")
     location = item.get("location")
     notes = item.get("description")
+    event_id = item.get("id")
 
     start = item.get("start", {})
     end = item.get("end", {})
@@ -116,6 +135,7 @@ def _from_google(item: dict[str, Any]) -> Event:
             end_date=end_dt.date() if end_dt.date() != start_dt.date() else None,
             location=location,
             notes=notes,
+            id=event_id,
         )
 
     start_date = date.fromisoformat(start["date"])
@@ -127,4 +147,5 @@ def _from_google(item: dict[str, Any]) -> Event:
         end_date=inclusive_end if inclusive_end != start_date else None,
         location=location,
         notes=notes,
+        id=event_id,
     )
