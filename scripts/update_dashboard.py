@@ -29,8 +29,8 @@ THRESHOLDS: dict[str, float] = {
 MODULES: list[dict[str, object]] = [
     {"id": 0, "name": "Setup",            "status": "done"},
     {"id": 1, "name": "Agent core",       "status": "done"},
-    {"id": 2, "name": "Evals + Ollama",   "status": "in_progress"},
-    {"id": 3, "name": "Google Calendar",  "status": "todo"},
+    {"id": 2, "name": "Evals + Ollama",   "status": "done"},
+    {"id": 3, "name": "Google Calendar",  "status": "done"},
     {"id": 4, "name": "Telegram + files", "status": "todo"},
     {"id": 5, "name": "Data + cost",      "status": "todo"},
     {"id": 6, "name": "Reminders",        "status": "todo"},

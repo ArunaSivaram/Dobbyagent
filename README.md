@@ -15,7 +15,7 @@ Raw PRD in [`docs/PRD.md`](docs/PRD.md). Per module reflection notes in [`LEARNI
 ## Latest evals
 
 <!-- BEGIN:scorecard -->
-_Latest evals · updated 2026-11-20 12:22 UTC_
+_Latest evals · updated 2026-11-20 12:41 UTC_
 
 | Model | Hosting | Cost / msg | Latency p95 | Thresholds passed | Status |
 | --- | --- | --- | --- | --- | --- |
