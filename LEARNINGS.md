@@ -44,6 +44,12 @@ surprised you, and the one-line definition of each new term.
 
 ## Module 3
 
+- **Two files, two jobs.** `credentials.json` says "this is the Dobby app" (the Cloud Console OAuth client); `token.json` says "this is Aruna, and she said yes." The first is static and you downloaded it once; the second is written by the library after the browser flow and silently refreshed from then on. Lose `token.json` and Dobby just re-opens the browser next run. Lose `credentials.json` and the app is gone.
+- **Adapter = translation layer.** `GoogleCalendar` implements `CalendarPort`, so `agent.py`, the tests, and the evals didn't change a line. `_to_google` and `_from_google` are the two ~20-line pure functions that convert between our clean `Event` dataclass and Google's nested JSON — tested in isolation with fixtures, no network. Every external service in Dobby will follow this shape.
+- **`extendedProperties.private` is the clean tag.** Google Calendar's built-in key/value metadata on events is invisible in the UI and queryable via API, so `dobby=1` doesn't pollute notes/description. Later modules (`/undo`, `/usage`) will filter by this tag to find "events Dobby created."
+- **All-day event end dates are exclusive.** Google wants `end.date = start.date + 1 day` for a one-day event, and `end_date + 1` for multi-day. The agent's `Event` model uses inclusive end_date, so the adapter adds 1 on write and subtracts 1 on read. Got this wrong once; fixtures caught it.
+- **One macOS gotcha caught us twice now.** `uv run` (without `--no-sync`) re-hides the editable `.pth` file every call, so `python -m dobby` fails with `ModuleNotFoundError`. Fix is a `make dobby ARGS='...'` target that does `unhide` first then `uv run --no-sync`. Don't trust that `make unhide` alone is enough if the next command re-syncs.
+
 ## Module 4
 
 ## Module 4b

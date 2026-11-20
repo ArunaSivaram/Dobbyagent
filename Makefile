@@ -1,6 +1,6 @@
 PTH_FILES := .venv/lib/python3.12/site-packages/*.pth
 
-.PHONY: setup unhide test lint check eval run
+.PHONY: setup unhide test lint check eval run dobby
 
 setup:
 	uv sync
@@ -26,3 +26,6 @@ eval: unhide
 
 run: unhide
 	uv run --no-sync python $(ARGS)
+
+dobby: unhide
+	uv run --no-sync python -m dobby $(ARGS)
