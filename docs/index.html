@@ -184,18 +184,33 @@
         the same agent code runs against Claude in production and against a fake
         calendar in evals, without a line of change.
       </p>
-      <pre class="mt-5 rounded-lg bg-slate-900 text-slate-100 p-5 text-xs md:text-sm overflow-x-auto"><code>  pasted message
-        │
-        ▼
-  ┌──────────────────── run_agent() ────────────────────┐
-  │   while step &lt; MAX_STEPS = 8:                       │
-  │     response = client.complete(system, msgs, tools) │──► LLMClient port
-  │     if response.stop == "end": return reply         │     ├─ AnthropicClient  (Claude Haiku 4.5)
-  │     for tc in response.tool_calls:                  │     └─ OllamaClient     (Qwen3:8b, local)
-  │       results.append(run_tool(tc, calendar))        │
-  │     msgs += [assistant_turn, user_tool_results]     │──► CalendarPort
-  └─────────────────────────────────────────────────────┘     ├─ InMemoryCalendar (tests, evals)
-                                                              └─ GoogleCalendar   (Module 3, production)</code></pre>
+      <p class="mt-3 text-slate-700 leading-relaxed">
+        The Telegram bot is a thin adapter in front of the loop. It polls Telegram
+        for messages, checks the sender against an allowlist, and dispatches on
+        content: free text runs the full agent loop, <span class="mono">/upcoming</span>
+        and <span class="mono">/undo</span> go straight to the calendar. The agent
+        itself is unaware Telegram exists — <span class="mono">python -m dobby "…"</span>
+        and the bot both call <span class="mono">run_agent()</span> with the same
+        arguments.
+      </p>
+      <pre class="mt-5 rounded-lg bg-slate-900 text-slate-100 p-5 text-xs md:text-sm overflow-x-auto"><code>  Telegram ◀──polls──▶ bot.py (async wrappers, allowlist)
+                           │
+                           │ dispatch on content:
+                           │   ├─ /upcoming  ──▶ calendar.list_events()
+                           │   ├─ /undo      ──▶ calendar.delete_event() × N  (from per-chat state)
+                           │   └─ plain text ──▶ handle_text() ──┐
+                           │                                     │
+  CLI (make dobby) ────────┴─────────────────────────────────────┤
+                                                                 ▼
+                           ┌──────────────── run_agent() ─────────────────┐
+                           │   while step &lt; MAX_STEPS = 8:                │
+                           │     response = client.complete(sys, msgs, t) │──▶ LLMClient port
+                           │     if response.stop == "end": return reply  │    ├─ AnthropicClient (Haiku 4.5)
+                           │     for tc in response.tool_calls:           │    └─ OllamaClient    (Qwen3:8b, local)
+                           │       results.append(run_tool(tc, calendar)) │
+                           │     msgs += [assistant_turn, tool_results]   │──▶ CalendarPort
+                           └──────────────────────────────────────────────┘    ├─ InMemoryCalendar (tests, evals)
+                                                                               └─ GoogleCalendar   (production)</code></pre>
     </section>
 
     <!-- Evals -->
@@ -344,7 +359,7 @@
   <!-- Data block: replaced by scripts/update_dashboard.py -->
   <script id="eval-data" type="application/json">
 {
-  "updated_at": "2026-11-20 14:46 UTC",
+  "updated_at": "2026-11-20 14:51 UTC",
   "thresholds": {
     "date_time_accuracy": 0.95,
     "event_recall": 0.95,
