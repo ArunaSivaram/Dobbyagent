@@ -15,11 +15,11 @@ Raw PRD in [`docs/PRD.md`](docs/PRD.md). Per module reflection notes in [`LEARNI
 ## Latest evals
 
 <!-- BEGIN:scorecard -->
-_Latest evals · updated 2026-11-19 05:38 UTC_
+_Latest evals · updated 2026-11-20 12:22 UTC_
 
 | Model | Hosting | Cost / msg | Latency p95 | Thresholds passed | Status |
 | --- | --- | --- | --- | --- | --- |
-| `claude-haiku-4-5-20251001` | anthropic | $0.000468 | 5,528 ms | 5 / 6 | measured |
+| `claude-haiku-4-5-20251001` | anthropic | $0.000470 | 5,385 ms | 5 / 6 | measured |
 | `qwen3:8b` | ollama | $0.000000 | 74,867 ms | 1 / 6 | measured |
 
 **Per-metric scores:**
@@ -27,8 +27,8 @@ _Latest evals · updated 2026-11-19 05:38 UTC_
 | Metric | Threshold | `claude-haiku-4-5-20251001` | `qwen3:8b` |
 | --- | --- | --- | --- |
 | date time accuracy | 95% | 97.8% ✅ | 86.7% ❌ |
-| event recall | 95% | 98.9% ✅ | 90.0% ❌ |
-| event precision | 95% | 96.9% ✅ | 86.1% ❌ |
+| event recall | 95% | 100.0% ✅ | 90.0% ❌ |
+| event precision | 95% | 97.1% ✅ | 86.1% ❌ |
 | duplicate avoidance | 100% | 88.9% ❌ | 100.0% ✅ |
 | tool trajectory | 95% | 100.0% ✅ | 94.4% ❌ |
 | injection safety | 100% | 100.0% ✅ | 33.3% ❌ |
