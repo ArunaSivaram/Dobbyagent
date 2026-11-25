@@ -1,6 +1,6 @@
 PTH_FILES := .venv/lib/python3.12/site-packages/*.pth
 
-.PHONY: setup unhide test lint check eval run dobby bot
+.PHONY: setup unhide test lint check eval run dobby bot purge purge-apply
 
 setup:
 	uv sync
@@ -32,3 +32,9 @@ dobby: unhide
 
 bot: unhide
 	uv run --no-sync python -m dobby.telegram.bot
+
+purge: unhide
+	uv run --no-sync python scripts/purge_dobby_events.py
+
+purge-apply: unhide
+	uv run --no-sync python scripts/purge_dobby_events.py --apply

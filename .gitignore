@@ -7,3 +7,12 @@ token.json
 credentials.json
 .DS_Store
 evals/results/
+
+# Personal/real-world fixture content — keep out of the public repo.
+# Only the synthetic PDFs explicitly whitelisted below are committed.
+evals/fixtures/images/
+evals/fixtures/pdfs/*
+!evals/fixtures/pdfs/concert_ticket.pdf
+!evals/fixtures/pdfs/dentist_reminder.pdf
+!evals/fixtures/pdfs/conference_agenda.pdf
+!evals/fixtures/pdfs/flight_itinerary.pdf
