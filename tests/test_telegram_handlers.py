@@ -2,10 +2,19 @@
 from __future__ import annotations
 
 from datetime import date, time
+from io import BytesIO
+
+from pypdf import PdfWriter
 
 from dobby.calendar.fake import InMemoryCalendar
-from dobby.llm.types import LLMResponse, ToolCall, Usage
-from dobby.telegram.handlers import handle_text, handle_undo, handle_upcoming
+from dobby.llm.types import LLMResponse, ToolCall, TranscribeResult, Usage
+from dobby.telegram.handlers import (
+    MAX_IMAGE_BYTES,
+    handle_file,
+    handle_text,
+    handle_undo,
+    handle_upcoming,
+)
 
 TODAY = date(2026, 11, 20)
 
@@ -156,3 +165,121 @@ def test_handle_text_with_no_creates_returns_empty_ids():
 
     assert "nothing to add" in reply.lower()
     assert ids == []
+
+
+# ---------- handle_file ----------
+
+
+class _ScriptedTranscriber:
+    """Transcriber that returns a pre-configured result without touching the network."""
+
+    def __init__(self, result: TranscribeResult) -> None:
+        self._result = result
+
+    def transcribe(self, data: bytes, mime_type: str) -> TranscribeResult:
+        return self._result
+
+
+def _make_pdf(n_pages: int) -> bytes:
+    writer = PdfWriter()
+    for _ in range(n_pages):
+        writer.add_blank_page(width=100, height=100)
+    buf = BytesIO()
+    writer.write(buf)
+    return buf.getvalue()
+
+
+def _readable(transcript: str) -> TranscribeResult:
+    return TranscribeResult(
+        is_readable=True, transcript=transcript, reason="",
+        usage=_zero_usage(),
+    )
+
+
+def _unreadable(reason: str) -> TranscribeResult:
+    return TranscribeResult(
+        is_readable=False, transcript="", reason=reason,
+        usage=_zero_usage(),
+    )
+
+
+def test_handle_file_rejects_unsupported_mime():
+    reply, ids = handle_file(
+        data=b"...", mime_type="application/zip",
+        calendar=InMemoryCalendar(), today=TODAY,
+        client=_ScriptedClient([]), transcriber=_ScriptedTranscriber(_readable("x")),
+    )
+    assert "only read images and PDFs" in reply
+    assert ids == []
+
+
+def test_handle_file_rejects_oversized_image():
+    too_big = b"\x00" * (MAX_IMAGE_BYTES + 1)
+    reply, ids = handle_file(
+        data=too_big, mime_type="image/jpeg",
+        calendar=InMemoryCalendar(), today=TODAY,
+        client=_ScriptedClient([]), transcriber=_ScriptedTranscriber(_readable("x")),
+    )
+    assert "MB" in reply
+    assert "under" in reply
+    assert ids == []
+
+
+def test_handle_file_rejects_pdf_with_too_many_pages():
+    pdf = _make_pdf(n_pages=6)
+    reply, ids = handle_file(
+        data=pdf, mime_type="application/pdf",
+        calendar=InMemoryCalendar(), today=TODAY,
+        client=_ScriptedClient([]), transcriber=_ScriptedTranscriber(_readable("x")),
+    )
+    assert "6 pages" in reply
+    assert ids == []
+
+
+def test_handle_file_rejects_corrupted_pdf():
+    reply, ids = handle_file(
+        data=b"not actually a pdf", mime_type="application/pdf",
+        calendar=InMemoryCalendar(), today=TODAY,
+        client=_ScriptedClient([]), transcriber=_ScriptedTranscriber(_readable("x")),
+    )
+    assert "couldn't open" in reply.lower() or "corrupted" in reply.lower()
+    assert ids == []
+
+
+def test_handle_file_returns_unreadable_message_when_transcriber_says_no():
+    pdf = _make_pdf(n_pages=1)
+    reply, ids = handle_file(
+        data=pdf, mime_type="application/pdf",
+        calendar=InMemoryCalendar(), today=TODAY,
+        client=_ScriptedClient([]),
+        transcriber=_ScriptedTranscriber(_unreadable("page is blank")),
+    )
+    assert "blank" in reply.lower()
+    assert "clearer photo" in reply.lower() or "paste" in reply.lower()
+    assert ids == []
+
+
+def test_handle_file_runs_agent_on_transcript_and_returns_ids():
+    pdf = _make_pdf(n_pages=1)
+    transcript = "Concert at Melody Hall on Saturday 14 March 2027 at 8pm."
+    create_call = ToolCall(
+        id="tc1", name="create_event",
+        input={"title": "Concert", "date": "2027-03-14", "start_time": "20:00"},
+    )
+    responses = [
+        LLMResponse(text="", stop="tool", tool_calls=[create_call], usage=_zero_usage()),
+        LLMResponse(text="Added Concert on 14 Mar at 20:00.", stop="end",
+                    tool_calls=[], usage=_zero_usage()),
+    ]
+    cal = InMemoryCalendar()
+
+    reply, ids = handle_file(
+        data=pdf, mime_type="application/pdf",
+        calendar=cal, today=TODAY,
+        client=_ScriptedClient(responses),
+        transcriber=_ScriptedTranscriber(_readable(transcript)),
+    )
+
+    assert "Concert" in reply
+    assert len(ids) == 1
+    assert cal.list_events(date(2027, 3, 14), date(2027, 3, 14))[0].title == "Concert"

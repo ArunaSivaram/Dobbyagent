@@ -6,12 +6,25 @@ the calendar or the agent lives here.
 from __future__ import annotations
 
 from datetime import date, time, timedelta
+from io import BytesIO
+
+from pypdf import PdfReader
+from pypdf.errors import PdfReadError
 
 from dobby.agent import run_agent
 from dobby.calendar.base import CalendarPort, Event
-from dobby.llm.base import LLMClient
+from dobby.llm.base import LLMClient, Transcriber
 
 UPCOMING_WINDOW_DAYS = 7
+
+MAX_IMAGE_BYTES = 5 * 1024 * 1024
+MAX_PDF_BYTES = 10 * 1024 * 1024
+MAX_PDF_PAGES = 5
+
+SUPPORTED_IMAGE_MIME: tuple[str, ...] = (
+    "image/jpeg", "image/png", "image/webp", "image/gif",
+)
+PDF_MIME = "application/pdf"
 
 
 def handle_text(
@@ -24,6 +37,75 @@ def handle_text(
     result = run_agent(message=text, calendar=calendar, today=today, client=client)
     ids = [e.id for e in result.created_events if e.id]
     return result.reply, ids
+
+
+def handle_file(
+    data: bytes,
+    mime_type: str,
+    calendar: CalendarPort,
+    today: date,
+    client: LLMClient,
+    transcriber: Transcriber,
+) -> tuple[str, list[str]]:
+    """Transcribe an image or PDF, then run the agent on the transcript.
+
+    Returns (reply, created_event_ids). If the file is rejected or unreadable,
+    created_event_ids is empty and the reply explains why.
+    """
+    error = _validate_file(data, mime_type)
+    if error:
+        return error, []
+
+    result = transcriber.transcribe(data, mime_type)
+    if not result.is_readable or not result.transcript.strip():
+        reason = result.reason or "no event information found"
+        msg = (
+            f"I couldn't read that file: {reason}. "
+            "Try a clearer photo or paste the details as text."
+        )
+        return msg, []
+
+    agent_result = run_agent(
+        message=result.transcript, calendar=calendar, today=today, client=client,
+    )
+    ids = [e.id for e in agent_result.created_events if e.id]
+    return agent_result.reply, ids
+
+
+def _validate_file(data: bytes, mime_type: str) -> str | None:
+    """Return an error message if the file should be rejected, else None."""
+    if mime_type in SUPPORTED_IMAGE_MIME:
+        if len(data) > MAX_IMAGE_BYTES:
+            mb = len(data) / (1024 * 1024)
+            return (
+                f"That image is {mb:.1f} MB. Please send one under "
+                f"{MAX_IMAGE_BYTES // (1024 * 1024)} MB."
+            )
+        return None
+    if mime_type == PDF_MIME:
+        if len(data) > MAX_PDF_BYTES:
+            mb = len(data) / (1024 * 1024)
+            return (
+                f"That PDF is {mb:.1f} MB. Please send one under "
+                f"{MAX_PDF_BYTES // (1024 * 1024)} MB."
+            )
+        pages = _pdf_page_count(data)
+        if pages is None:
+            return "I couldn't open that PDF — it may be corrupted."
+        if pages > MAX_PDF_PAGES:
+            return (
+                f"That PDF has {pages} pages. Please send one with "
+                f"{MAX_PDF_PAGES} or fewer."
+            )
+        return None
+    return f"I can only read images and PDFs, not {mime_type!r}."
+
+
+def _pdf_page_count(data: bytes) -> int | None:
+    try:
+        return len(PdfReader(BytesIO(data)).pages)
+    except (PdfReadError, ValueError, OSError):
+        return None
 
 
 def handle_upcoming(calendar: CalendarPort, today: date) -> str:

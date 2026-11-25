@@ -8,6 +8,7 @@ dependencies = [
     "anthropic>=2.3.0",
     "google-api-python-client>=2.0.0",
     "google-auth-oauthlib>=1.2.0",
+    "pypdf>=7.1.1",
     "python-dotenv>=1.2.4",
     "python-telegram-bot>=21.0",
 ]
