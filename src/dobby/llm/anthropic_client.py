@@ -6,6 +6,8 @@ model-specific price table.
 """
 from __future__ import annotations
 
+import base64
+import json
 import logging
 import time
 from typing import Any
@@ -20,6 +22,7 @@ from dobby.llm.types import (
     ToolCall,
     ToolResult,
     ToolSchema,
+    TranscribeResult,
     Usage,
 )
 
@@ -36,6 +39,27 @@ PRICES: dict[str, dict[str, float]] = {
 }
 
 MAX_TOKENS = 1024
+TRANSCRIBE_MAX_TOKENS = 2048
+
+TRANSCRIBE_SYSTEM = (
+    "You transcribe images and PDFs so another agent can turn them into "
+    "calendar events. Extract every piece of text that mentions a date, time, "
+    "place, deadline or event name — keep it faithful and verbatim where "
+    "possible. Do not summarise, interpret dates, or create events yourself. "
+    "If the file is too blurry, cropped, illegible, or clearly has no event "
+    "information, set is_readable to false and explain in one short sentence. "
+    "Respond with ONLY a single JSON object matching this shape, no prose, no "
+    "code fences:\n"
+    '{"is_readable": bool, "transcript": string, "reason": string}'
+)
+TRANSCRIBE_USER = (
+    "Transcribe this file for the downstream calendar agent."
+)
+
+SUPPORTED_IMAGE_MIME: tuple[str, ...] = (
+    "image/jpeg", "image/png", "image/webp", "image/gif",
+)
+SUPPORTED_PDF_MIME: str = "application/pdf"
 
 
 class AnthropicClient:
@@ -76,6 +100,72 @@ class AnthropicClient:
         latency_ms = int((time.monotonic() - start) * 1000)
 
         return _from_claude_response(response, self._model, latency_ms)
+
+    def transcribe(self, data: bytes, mime_type: str) -> TranscribeResult:
+        content_block = _to_file_block(data, mime_type)
+
+        start = time.monotonic()
+        response = self._client.messages.create(
+            model=self._model,
+            system=TRANSCRIBE_SYSTEM,
+            messages=[
+                {
+                    "role": "user",
+                    "content": [content_block, {"type": "text", "text": TRANSCRIBE_USER}],
+                }
+            ],
+            max_tokens=TRANSCRIBE_MAX_TOKENS,
+        )
+        latency_ms = int((time.monotonic() - start) * 1000)
+
+        raw_text = "".join(
+            block.text for block in response.content if block.type == "text"
+        )
+        usage = _usage_from_response(response, self._model, latency_ms)
+        _log_transcribe(usage, self._model, mime_type)
+        return _parse_transcribe_response(raw_text, usage)
+
+
+def _to_file_block(data: bytes, mime_type: str) -> dict[str, Any]:
+    encoded = base64.b64encode(data).decode("ascii")
+    if mime_type in SUPPORTED_IMAGE_MIME:
+        return {
+            "type": "image",
+            "source": {"type": "base64", "media_type": mime_type, "data": encoded},
+        }
+    if mime_type == SUPPORTED_PDF_MIME:
+        return {
+            "type": "document",
+            "source": {
+                "type": "base64",
+                "media_type": SUPPORTED_PDF_MIME,
+                "data": encoded,
+            },
+        }
+    raise ValueError(f"unsupported mime type for transcribe: {mime_type!r}")
+
+
+def _parse_transcribe_response(raw: str, usage: Usage) -> TranscribeResult:
+    stripped = raw.strip()
+    if stripped.startswith("```"):
+        stripped = stripped.strip("`")
+        stripped = stripped.removeprefix("json")
+        stripped = stripped.strip()
+    try:
+        obj = json.loads(stripped)
+    except json.JSONDecodeError:
+        return TranscribeResult(
+            is_readable=False,
+            transcript="",
+            reason="model did not return valid JSON",
+            usage=usage,
+        )
+    return TranscribeResult(
+        is_readable=bool(obj.get("is_readable", False)),
+        transcript=str(obj.get("transcript", "") or ""),
+        reason=str(obj.get("reason", "") or ""),
+        usage=usage,
+    )
 
 
 def _to_claude_messages(messages: list[Message]) -> list[dict[str, Any]]:
@@ -196,4 +286,16 @@ def _log_call(usage: Usage, model: str, stop: Stop) -> None:
         usage.cost_usd,
         usage.latency_ms,
         stop,
+    )
+
+
+def _log_transcribe(usage: Usage, model: str, mime_type: str) -> None:
+    logger.info(
+        "llm_transcribe model=%s mime=%s in=%d out=%d cost=$%.6f latency=%dms",
+        model,
+        mime_type,
+        usage.input_tokens,
+        usage.output_tokens,
+        usage.cost_usd,
+        usage.latency_ms,
     )

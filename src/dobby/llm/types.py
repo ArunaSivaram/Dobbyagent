@@ -77,3 +77,18 @@ class LLMResponse:
     tool_calls: list[ToolCall]
     stop: Stop
     usage: Usage
+
+
+@dataclass(frozen=True)
+class TranscribeResult:
+    """Outcome of asking the LLM to transcribe an image or PDF to plain text.
+
+    `is_readable=False` means the model couldn't extract event-relevant text —
+    the caller should ask the user for a clearer version rather than running
+    the agent on an empty transcript.
+    """
+
+    is_readable: bool
+    transcript: str
+    reason: str
+    usage: Usage
