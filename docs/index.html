@@ -187,21 +187,27 @@
       <p class="mt-3 text-slate-700 leading-relaxed">
         The Telegram bot is a thin adapter in front of the loop. It polls Telegram
         for messages, checks the sender against an allowlist, and dispatches on
-        content: free text runs the full agent loop, <span class="mono">/upcoming</span>
-        and <span class="mono">/undo</span> go straight to the calendar. The agent
-        itself is unaware Telegram exists — <span class="mono">python -m dobby "…"</span>
-        and the bot both call <span class="mono">run_agent()</span> with the same
-        arguments.
+        content: free text runs the full agent loop, a photo or small PDF is
+        transcribed once and then runs the same loop,
+        <span class="mono">/upcoming</span> and <span class="mono">/undo</span> go
+        straight to the calendar. The agent itself is unaware Telegram exists —
+        <span class="mono">python -m dobby "…"</span> and the bot both call
+        <span class="mono">run_agent()</span> with the same arguments, and files
+        feed in as the resulting transcript.
       </p>
       <pre class="mt-5 rounded-lg bg-slate-900 text-slate-100 p-5 text-xs md:text-sm overflow-x-auto"><code>  Telegram ◀──polls──▶ bot.py (async wrappers, allowlist)
                            │
                            │ dispatch on content:
                            │   ├─ /upcoming  ──▶ calendar.list_events()
                            │   ├─ /undo      ──▶ calendar.delete_event() × N  (from per-chat state)
-                           │   └─ plain text ──▶ handle_text() ──┐
-                           │                                     │
-  CLI (make dobby) ────────┴─────────────────────────────────────┤
-                                                                 ▼
+                           │   ├─ plain text ──▶ handle_text() ──────────────────────┐
+                           │   └─ photo/PDF  ──▶ handle_file() ──▶ transcribe() ──┐  │
+                           │                       (validate size,                │  │
+                           │                        ≤5 pages for PDF)             │  │
+                           │                                                      ▼  ▼
+  CLI (make dobby) ────────┴────────────────────────────────────▶ run_agent(text or transcript)
+                                                                      │
+                                                                      ▼
                            ┌──────────────── run_agent() ─────────────────┐
                            │   while step &lt; MAX_STEPS = 8:                │
                            │     response = client.complete(sys, msgs, t) │──▶ LLMClient port
@@ -210,7 +216,11 @@
                            │       results.append(run_tool(tc, calendar)) │
                            │     msgs += [assistant_turn, tool_results]   │──▶ CalendarPort
                            └──────────────────────────────────────────────┘    ├─ InMemoryCalendar (tests, evals)
-                                                                               └─ GoogleCalendar   (production)</code></pre>
+                                                                               └─ GoogleCalendar   (production)
+
+  Transcriber port — one Claude vision call before the loop, photos + PDFs only:
+    └─ AnthropicClient.transcribe(bytes, mime) → JSON {is_readable, transcript, reason}
+    (OllamaClient does not implement Transcriber. If the user picks Ollama, files are rejected.)</code></pre>
     </section>
 
     <!-- Evals -->
@@ -246,7 +256,76 @@
           <div class="mt-3 text-sm text-slate-700 space-y-3 leading-relaxed">
             <p>Every call to Claude returns four token counts in <span class="mono">response.usage</span>: input tokens, output tokens, cache read tokens, and cache write tokens. Each is multiplied by the per million token price for its model, then summed and divided by one million.</p>
             <pre class="rounded-md bg-slate-50 p-3 text-xs mono overflow-x-auto">cost = (0.10 * input + 0.50 * output + 0.01 * cache_read + 0.125 * cache_write) / 1_000_000</pre>
-            <p>One run (one message) has several calls because of the tool loop, so the run cost is the sum of its calls. Ollama runs are local, so cost is always $0.</p>
+            <p>A text run (one message) has several calls because of the tool loop, so the run cost is the sum of its calls. A photo or PDF run adds one upfront vision call (see the next section), then the same tool loop. Ollama runs are local, so cost is always $0.</p>
+          </div>
+        </details>
+        <details class="rounded-lg border border-slate-200 bg-white p-5" open>
+          <summary class="font-semibold">Transcription cost for photos and PDFs</summary>
+          <div class="mt-3 text-sm text-slate-700 space-y-3 leading-relaxed">
+            <p>
+              A photo or PDF adds <em>one</em> Claude vision call before the agent loop.
+              The image or document bytes are counted as input tokens using the
+              same per million price; the output is the transcript itself,
+              typically 200&ndash;500 tokens of plain prose. Images are capped at
+              5 MB, PDFs at 10 MB and 5 pages, so the bytes staying small keeps
+              the cost bounded.
+            </p>
+            <p class="text-xs text-slate-500">
+              Measured on Haiku 4.5 during the first live Telegram tests
+              on 2026-11-25. Each row is one real file sent through the bot.
+            </p>
+            <div class="overflow-x-auto">
+              <table class="w-full text-sm">
+                <thead class="text-left text-xs uppercase tracking-wider text-slate-500">
+                  <tr>
+                    <th class="py-2">File</th>
+                    <th class="py-2 text-right">Transcribe in / out</th>
+                    <th class="py-2 text-right">Transcribe $</th>
+                    <th class="py-2 text-right">Agent loop $</th>
+                    <th class="py-2 text-right">Total $</th>
+                    <th class="py-2 text-right">vs text (mean $0.000466)</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100">
+                  <tr>
+                    <td class="py-2">1 photo (jpeg)</td>
+                    <td class="py-2 text-right mono">1,685 / 214</td>
+                    <td class="py-2 text-right mono">$0.000275</td>
+                    <td class="py-2 text-right mono">$0.000579</td>
+                    <td class="py-2 text-right mono font-semibold">$0.000854</td>
+                    <td class="py-2 text-right mono text-slate-500">1.8&times;</td>
+                  </tr>
+                  <tr>
+                    <td class="py-2">1 PDF (1 page, hotel booking)</td>
+                    <td class="py-2 text-right mono">4,484 / 243</td>
+                    <td class="py-2 text-right mono">$0.000570</td>
+                    <td class="py-2 text-right mono">$0.000798</td>
+                    <td class="py-2 text-right mono font-semibold">$0.001368</td>
+                    <td class="py-2 text-right mono text-slate-500">2.9&times;</td>
+                  </tr>
+                  <tr>
+                    <td class="py-2">1 PDF (2 pages, flight itinerary)</td>
+                    <td class="py-2 text-right mono">3,836 / 461</td>
+                    <td class="py-2 text-right mono">$0.000614</td>
+                    <td class="py-2 text-right mono">$0.000949</td>
+                    <td class="py-2 text-right mono font-semibold">$0.001563</td>
+                    <td class="py-2 text-right mono text-slate-500">3.4&times;</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <p>
+              Rule of thumb: a file message costs about <strong>2&ndash;3&times;</strong>
+              a text message on Haiku 4.5. At the measured range, 60 photo/PDF
+              messages a month runs ~$0.05&ndash;$0.10 &mdash; comfortably inside
+              the $0.50 monthly budget.
+            </p>
+            <p>
+              If the transcription returns <span class="mono">is_readable: false</span>
+              (blurry, cropped, no event info), the loop is <em>not</em> entered
+              and no further calls fire. Cost is the one transcribe call only
+              (~$0.0003), and Dobby replies asking for a clearer file.
+            </p>
           </div>
         </details>
         <details class="rounded-lg border border-slate-200 bg-white p-5">
@@ -268,7 +347,7 @@
         <details class="rounded-lg border border-slate-200 bg-white p-5">
           <summary class="font-semibold">Monthly budget math</summary>
           <div class="mt-3 text-sm text-slate-700 space-y-3 leading-relaxed">
-            <p>At the measured $0.0005 per message on Haiku, a user sending sixty messages in a month costs about $0.03. Default budget is $0.50, which leaves room for photos and PDFs (roughly 2x text cost).</p>
+            <p>At the measured $0.0005 per text message on Haiku, a user sending sixty messages in a month costs about $0.03. Default budget is $0.50, which leaves room for photos and PDFs — measured at 2&ndash;3&times; text cost (see <em>Transcription cost for photos and PDFs</em> above).</p>
             <p>Before each run, the service sums this month's <span class="mono">cost_usd</span> for the user. At 80 percent of budget, a one line warning is appended to the reply. At 100 percent, Dobby pauses. No model call fires, and a polite message goes back.</p>
             <p>A hard monthly spend limit is also set in the Anthropic Console as a backstop above the per user guard.</p>
           </div>
@@ -359,7 +438,7 @@
   <!-- Data block: replaced by scripts/update_dashboard.py -->
   <script id="eval-data" type="application/json">
 {
-  "updated_at": "2026-11-20 14:51 UTC",
+  "updated_at": "2026-11-25 14:45 UTC",
   "thresholds": {
     "date_time_accuracy": 0.95,
     "event_recall": 0.95,
