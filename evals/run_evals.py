@@ -29,7 +29,7 @@ from dobby.calendar.base import Event
 from dobby.calendar.fake import InMemoryCalendar
 from dobby.config import OLLAMA_BASE_URL
 from dobby.llm import get_client
-from dobby.llm.base import LLMClient
+from dobby.llm.base import LLMClient, Transcriber
 from dobby.llm.types import LLMResponse, Message, ToolSchema
 from evals.graders import (
     date_time_accuracy,
@@ -55,6 +55,15 @@ THRESHOLDS: dict[str, float] = {
 DEFAULT_ALLOWED_TOOLS: list[str] = ["list_events", "create_event"]
 CASES_PATH = Path("evals/cases.jsonl")
 RESULTS_DIR = Path("evals/results")
+FIXTURES_DIR = Path("evals/fixtures")
+
+MIME_BY_SUFFIX: dict[str, str] = {
+    ".pdf": "application/pdf",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".webp": "image/webp",
+}
 
 
 # --- recording wrapper ----------------------------------------------------
@@ -92,9 +101,11 @@ class RunScore:
     injection_safety: float | None
     created_events: int
     model_calls: int
-    cost_usd: float
+    cost_usd: float  # includes transcribe_cost_usd for file cases
     latency_ms: int
     error: str | None = None
+    transcribe_cost_usd: float = 0.0  # 0 for text cases
+    input_type: str = "text"  # "text" | "image" | "pdf"
 
 
 @dataclass
@@ -117,6 +128,16 @@ def main() -> int:
         _preflight_ollama(args.model)
 
     inner = get_client(provider=args.provider, model=args.model, temperature=0.0)
+    transcriber = inner if isinstance(inner, Transcriber) else None
+    if transcriber is None:
+        before = len(cases)
+        cases = [c for c in cases if c.get("input_type", "text") == "text"]
+        dropped = before - len(cases)
+        if dropped:
+            print(
+                f"Skipping {dropped} file case(s) — provider {args.provider!r} "
+                "does not implement the Transcriber protocol.\n"
+            )
 
     results: list[CaseResult] = []
     overall_start = time.monotonic()
@@ -124,7 +145,7 @@ def main() -> int:
         print(f"[{i}/{len(cases)}] {case['id']:<16} ({case['category']})", end=" ", flush=True)
         case_result = CaseResult(id=case["id"], category=case["category"])
         for _ in range(args.runs):
-            case_result.runs.append(_run_one(case, inner))
+            case_result.runs.append(_run_one(case, inner, transcriber))
             print(".", end="", flush=True)
         print()
         results.append(case_result)
@@ -143,15 +164,38 @@ def main() -> int:
     return 0
 
 
-def _run_one(case: dict[str, Any], inner_client: LLMClient) -> RunScore:
+def _run_one(
+    case: dict[str, Any],
+    inner_client: LLMClient,
+    transcriber: Transcriber | None,
+) -> RunScore:
     recorder = RecordingClient(inner_client)
     calendar = InMemoryCalendar(seed=[_seeded_event(e) for e in case["seeded_events"]])
     today = date.fromisoformat(case["today"])
     allowed_tools = case.get("allowed_tools", DEFAULT_ALLOWED_TOOLS)
+    input_type = case.get("input_type", "text")
 
+    transcribe_cost_usd = 0.0
     start = time.monotonic()
     try:
-        result = run_agent(case["message"], calendar, today, recorder)
+        if input_type == "text":
+            message = case["message"]
+        else:
+            assert transcriber is not None, "file case reached runner without a transcriber"
+            data, mime = _load_fixture(case["file_path"])
+            tr = transcriber.transcribe(data, mime)
+            transcribe_cost_usd = tr.usage.cost_usd
+            if not tr.is_readable or not tr.transcript.strip():
+                latency_ms = int((time.monotonic() - start) * 1000)
+                return _failed_file_run(
+                    case, input_type,
+                    reason=tr.reason or "transcriber returned empty transcript",
+                    transcribe_cost_usd=transcribe_cost_usd,
+                    latency_ms=latency_ms,
+                )
+            message = tr.transcript
+
+        result = run_agent(message, calendar, today, recorder)
     except Exception as e:  # noqa: BLE001 — one bad case shouldn't kill the eval
         return RunScore(
             date_time_accuracy=0.0,
@@ -162,12 +206,53 @@ def _run_one(case: dict[str, Any], inner_client: LLMClient) -> RunScore:
             injection_safety=0.0 if case["category"] == "injection" else None,
             created_events=0,
             model_calls=0,
-            cost_usd=0.0,
-            latency_ms=0,
+            cost_usd=transcribe_cost_usd,
+            latency_ms=int((time.monotonic() - start) * 1000),
             error=f"{type(e).__name__}: {e}\n{traceback.format_exc()}",
+            transcribe_cost_usd=transcribe_cost_usd,
+            input_type=input_type,
         )
     latency_ms = int((time.monotonic() - start) * 1000)
-    return _score(case, result, recorder.trace, allowed_tools, latency_ms)
+    score = _score(case, result, recorder.trace, allowed_tools, latency_ms)
+    score.cost_usd += transcribe_cost_usd
+    score.transcribe_cost_usd = transcribe_cost_usd
+    score.input_type = input_type
+    return score
+
+
+def _load_fixture(relative_path: str) -> tuple[bytes, str]:
+    """Load a fixture file as bytes + inferred mime type."""
+    path = FIXTURES_DIR / relative_path
+    mime = MIME_BY_SUFFIX.get(path.suffix.lower())
+    if mime is None:
+        raise ValueError(f"unknown fixture type: {path.suffix!r}")
+    return path.read_bytes(), mime
+
+
+def _failed_file_run(
+    case: dict[str, Any],
+    input_type: str,
+    *,
+    reason: str,
+    transcribe_cost_usd: float,
+    latency_ms: int,
+) -> RunScore:
+    """Transcriber said 'unreadable' — no events created, scored as such."""
+    return RunScore(
+        date_time_accuracy=0.0,
+        event_recall=0.0,
+        event_precision=1.0,  # no false positives (nothing created)
+        tool_trajectory=1.0,  # no bad tool calls (loop not entered)
+        duplicate_avoidance=0.0 if case["category"] == "duplicate" else None,
+        injection_safety=0.0 if case["category"] == "injection" else None,
+        created_events=0,
+        model_calls=0,
+        cost_usd=transcribe_cost_usd,
+        latency_ms=latency_ms,
+        error=f"unreadable: {reason}",
+        transcribe_cost_usd=transcribe_cost_usd,
+        input_type=input_type,
+    )
 
 
 def _score(

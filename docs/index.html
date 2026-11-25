@@ -438,7 +438,7 @@
   <!-- Data block: replaced by scripts/update_dashboard.py -->
   <script id="eval-data" type="application/json">
 {
-  "updated_at": "2026-11-25 14:53 UTC",
+  "updated_at": "2026-11-25 15:08 UTC",
   "thresholds": {
     "date_time_accuracy": 0.95,
     "event_recall": 0.95,
@@ -453,60 +453,64 @@
       "provider": "anthropic",
       "status": "measured",
       "runs_per_case": 3,
-      "case_count": 30,
-      "total_cost_usd": 0.042,
-      "cost_per_message_usd": 0.00046615555555555555,
-      "latency_ms_p50": 3646.5,
-      "latency_ms_p95": 4344.05,
+      "case_count": 34,
+      "total_cost_usd": 0.058,
+      "cost_per_message_usd": 0.0005683411764705882,
+      "latency_ms_p50": 3577.5,
+      "latency_ms_p95": 11887.349999999964,
       "scores": {
-        "date_time_accuracy": 1.0,
+        "date_time_accuracy": 0.9640522875816994,
         "event_recall": 1.0,
-        "event_precision": 0.9888888888888889,
-        "duplicate_avoidance": 0.8888888888888888,
+        "event_precision": 0.9803921568627451,
+        "duplicate_avoidance": 1.0,
         "tool_trajectory": 1.0,
         "injection_safety": 1.0
       },
-      "thresholds_passed": 5,
+      "thresholds_passed": 6,
       "by_category": {
         "ambiguous": {
-          "mean_latency_ms": 3593.8888888888887,
-          "mean_cost_usd": 0.0005008555555555556
+          "mean_latency_ms": 3355.4444444444443,
+          "mean_cost_usd": 0.0004978000000000001
         },
         "deadline": {
-          "mean_latency_ms": 3160.1111111111113,
-          "mean_cost_usd": 0.00047065555555555555
+          "mean_latency_ms": 3104.1111111111113,
+          "mean_cost_usd": 0.00047188888888888893
         },
         "duplicate": {
-          "mean_latency_ms": 2443.4444444444443,
-          "mean_cost_usd": 0.0003315666666666667
+          "mean_latency_ms": 2257.4444444444443,
+          "mean_cost_usd": 0.0003043222222222222
+        },
+        "file": {
+          "mean_latency_ms": 10785.583333333334,
+          "mean_cost_usd": 0.00137705
         },
         "injection": {
-          "mean_latency_ms": 3652.222222222222,
-          "mean_cost_usd": 0.0005224222222222222
+          "mean_latency_ms": 3724.4444444444443,
+          "mean_cost_usd": 0.0005201
         },
         "messy": {
-          "mean_latency_ms": 4028.3333333333335,
-          "mean_cost_usd": 0.0005429222222222222
+          "mean_latency_ms": 3892.8888888888887,
+          "mean_cost_usd": 0.0005382555555555556
         },
         "multiday": {
-          "mean_latency_ms": 3753.8888888888887,
-          "mean_cost_usd": 0.0005132222222222222
+          "mean_latency_ms": 3676.3333333333335,
+          "mean_cost_usd": 0.0005077333333333334
         },
         "multiple": {
-          "mean_latency_ms": 4494.444444444444,
-          "mean_cost_usd": 0.0006042222222222222
+          "mean_latency_ms": 4619.222222222223,
+          "mean_cost_usd": 0.0005991444444444445
         },
         "none": {
-          "mean_latency_ms": 1622.4444444444443,
-          "mean_cost_usd": 0.00015704444444444445
+          "mean_latency_ms": 1704,
+          "mean_cost_usd": 0.0001594888888888889
         },
         "relative": {
-          "mean_latency_ms": 3636.5555555555557,
-          "mean_cost_usd": 0.0005096111111111112
+          "mean_latency_ms": 3380.1111111111113,
+          "mean_cost_usd": 0.0004989777777777778
         },
         "single": {
-          "mean_latency_ms": 3635.1111111111113,
-          "mean_cost_usd": 0.0005090333333333334
+          "mean_latency_ms": 3610.6666666666665,
+          "mean_cost_usd": 0.0005074222222222223
         }
       }
     },
@@ -602,7 +606,7 @@
     {
       "id": "4b",
       "name": "Telegram files (photos + PDFs)",
-      "status": "in_progress"
+      "status": "done"
     },
     {
       "id": 5,
