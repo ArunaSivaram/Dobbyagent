@@ -72,7 +72,7 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     calendar: CalendarPort = context.bot_data["calendar"]
     client = context.bot_data["llm"]
     try:
-        pending = plan_from_text(
+        pending, agent_reply = plan_from_text(
             text=update.message.text,
             calendar=calendar,
             today=date.today(),
@@ -82,7 +82,7 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         logger.exception("plan_from_text failed")
         await update.message.reply_text(f"Sorry, something broke: {type(e).__name__}: {e}")
         return
-    await _start_dialogue(update, context, chat_id, pending)
+    await _start_dialogue(update, context, chat_id, pending, agent_reply)
 
 
 async def on_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -126,7 +126,7 @@ async def _dispatch_file(
 
     await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
     try:
-        pending, error = plan_from_file(
+        pending, agent_reply, error = plan_from_file(
             data=data, mime_type=mime_type,
             calendar=calendar, today=date.today(),
             client=client, transcriber=transcriber,
@@ -139,7 +139,7 @@ async def _dispatch_file(
         await update.message.reply_text(error)
         return
     assert pending is not None
-    await _start_dialogue(update, context, chat_id, pending)
+    await _start_dialogue(update, context, chat_id, pending, agent_reply)
 
 
 # ---------- dialogue state machine ----------
@@ -150,12 +150,15 @@ async def _start_dialogue(
     context: ContextTypes.DEFAULT_TYPE,
     chat_id: int,
     pending: list[PendingEvent],
+    agent_reply: str,
 ) -> None:
+    """Show the agent's summary (covers duplicate detection), then walk
+    through any new drafts. If there are no drafts, the summary is the
+    only message the user sees."""
     assert update.message is not None
+    reply = agent_reply.strip() or "Nothing to schedule from that message."
+    await update.message.reply_text(reply)
     if not pending:
-        await update.message.reply_text(
-            "Nothing to schedule from that message."
-        )
         return
     # New run starts fresh — drop any half-finished session for this chat.
     _sessions[chat_id] = ChatSession(chat_id=chat_id, queue=list(pending))

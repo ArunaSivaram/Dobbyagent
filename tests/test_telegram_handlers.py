@@ -138,19 +138,20 @@ def test_plan_from_text_returns_pending_events_without_writing_to_calendar():
     )
     responses = [
         LLMResponse(text="", stop="tool", tool_calls=[create_call], usage=_zero_usage()),
-        LLMResponse(text="Added.", stop="end", tool_calls=[], usage=_zero_usage()),
+        LLMResponse(text="Added Soccer.", stop="end", tool_calls=[], usage=_zero_usage()),
     ]
     cal = InMemoryCalendar()
 
-    pending = plan_from_text("soccer saturday 10am", cal, TODAY, _ScriptedClient(responses))
+    pending, reply = plan_from_text("soccer saturday 10am", cal, TODAY, _ScriptedClient(responses))
 
     assert len(pending) == 1
     assert pending[0].draft.title == "Soccer"
+    assert "Soccer" in reply
     # Crucially: the real calendar is still empty — nothing was committed.
     assert cal.list_events(date(2026, 1, 1), date(2027, 1, 1)) == []
 
 
-def test_plan_from_text_with_no_events_returns_empty_list():
+def test_plan_from_text_with_no_events_returns_empty_list_and_reply():
     responses = [
         LLMResponse(
             text="No dates mentioned.", stop="end", tool_calls=[], usage=_zero_usage()
@@ -158,9 +159,34 @@ def test_plan_from_text_with_no_events_returns_empty_list():
     ]
     cal = InMemoryCalendar()
 
-    pending = plan_from_text("just saying hi", cal, TODAY, _ScriptedClient(responses))
+    pending, reply = plan_from_text("just saying hi", cal, TODAY, _ScriptedClient(responses))
 
     assert pending == []
+    assert "No dates mentioned" in reply
+
+
+def test_plan_from_text_surfaces_duplicate_detection_via_reply():
+    """When the agent skips a duplicate, drafts is empty but reply explains why."""
+    list_call = ToolCall(
+        id="tc0", name="list_events",
+        input={"start_date": "2026-11-20", "end_date": "2026-11-30"},
+    )
+    responses = [
+        LLMResponse(text="", stop="tool", tool_calls=[list_call], usage=_zero_usage()),
+        LLMResponse(
+            text="Soccer on Nov 22 is already on your calendar — skipping.",
+            stop="end", tool_calls=[], usage=_zero_usage(),
+        ),
+    ]
+    cal = InMemoryCalendar()
+    cal.create_event(title="Soccer", date=date(2026, 11, 22))
+
+    pending, reply = plan_from_text(
+        "soccer saturday 10am", cal, TODAY, _ScriptedClient(responses),
+    )
+
+    assert pending == []
+    assert "already" in reply.lower() and "skip" in reply.lower()
 
 
 def test_plan_from_text_passes_real_calendar_to_agent_for_list_events():
@@ -193,6 +219,9 @@ def test_plan_from_text_passes_real_calendar_to_agent_for_list_events():
 
     # The agent's list_events tool call should have seen the real calendar.
     assert any("Already booked" in r for r in captured_tool_results)
+
+
+# Now update the file-based tests to the new 3-tuple return shape.
 
 
 def test_commit_pending_prepends_category_and_resolves_duration():
@@ -283,7 +312,7 @@ def _unreadable(reason: str) -> TranscribeResult:
 
 
 def test_plan_from_file_rejects_unsupported_mime():
-    pending, error = plan_from_file(
+    pending, _agent_reply, error = plan_from_file(
         data=b"...", mime_type="application/zip",
         calendar=InMemoryCalendar(), today=TODAY,
         client=_ScriptedClient([]), transcriber=_ScriptedTranscriber(_readable("x")),
@@ -294,7 +323,7 @@ def test_plan_from_file_rejects_unsupported_mime():
 
 def test_plan_from_file_rejects_oversized_image():
     too_big = b"\x00" * (MAX_IMAGE_BYTES + 1)
-    pending, error = plan_from_file(
+    pending, _agent_reply, error = plan_from_file(
         data=too_big, mime_type="image/jpeg",
         calendar=InMemoryCalendar(), today=TODAY,
         client=_ScriptedClient([]), transcriber=_ScriptedTranscriber(_readable("x")),
@@ -305,7 +334,7 @@ def test_plan_from_file_rejects_oversized_image():
 
 def test_plan_from_file_rejects_pdf_with_too_many_pages():
     pdf = _make_pdf(n_pages=6)
-    pending, error = plan_from_file(
+    pending, _agent_reply, error = plan_from_file(
         data=pdf, mime_type="application/pdf",
         calendar=InMemoryCalendar(), today=TODAY,
         client=_ScriptedClient([]), transcriber=_ScriptedTranscriber(_readable("x")),
@@ -315,7 +344,7 @@ def test_plan_from_file_rejects_pdf_with_too_many_pages():
 
 
 def test_plan_from_file_rejects_corrupted_pdf():
-    pending, error = plan_from_file(
+    pending, _agent_reply, error = plan_from_file(
         data=b"not actually a pdf", mime_type="application/pdf",
         calendar=InMemoryCalendar(), today=TODAY,
         client=_ScriptedClient([]), transcriber=_ScriptedTranscriber(_readable("x")),
@@ -328,7 +357,7 @@ def test_plan_from_file_rejects_corrupted_pdf():
 
 def test_plan_from_file_returns_error_when_transcriber_says_no():
     pdf = _make_pdf(n_pages=1)
-    pending, error = plan_from_file(
+    pending, _agent_reply, error = plan_from_file(
         data=pdf, mime_type="application/pdf",
         calendar=InMemoryCalendar(), today=TODAY,
         client=_ScriptedClient([]),
@@ -351,7 +380,7 @@ def test_plan_from_file_returns_pending_events_without_writing():
     ]
     cal = InMemoryCalendar()
 
-    pending, error = plan_from_file(
+    pending, agent_reply, error = plan_from_file(
         data=pdf, mime_type="application/pdf",
         calendar=cal, today=TODAY,
         client=_ScriptedClient(responses),
@@ -361,5 +390,6 @@ def test_plan_from_file_returns_pending_events_without_writing():
     assert error is None
     assert pending is not None and len(pending) == 1
     assert pending[0].draft.title == "Concert"
+    assert agent_reply == "Done."
     # Real calendar untouched until commit_pending is called.
     assert cal.list_events(date(2027, 3, 14), date(2027, 3, 14)) == []

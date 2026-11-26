@@ -35,16 +35,21 @@ def plan_from_text(
     calendar: CalendarPort,
     today: date,
     client: LLMClient,
-) -> list[PendingEvent]:
-    """Run the agent against a staging buffer and return pending events.
+) -> tuple[list[PendingEvent], str]:
+    """Run the agent against a staging buffer. Returns (drafts, agent_reply).
 
     Reads go to the real calendar (so duplicate-check still works), writes
     land in a throwaway InMemoryCalendar. Nothing is written to the real
     calendar until the dialogue layer confirms each event.
+
+    The agent's final reply is returned alongside the drafts so the bot can
+    surface it to the user — critical for duplicate detection, where the
+    agent correctly produces zero drafts but explains why in the reply.
     """
     staging = _StagingCalendar(real=calendar)
     agent_result = run_agent(message=text, calendar=staging, today=today, client=client)
-    return [PendingEvent(draft=e) for e in agent_result.created_events]
+    drafts = [PendingEvent(draft=e) for e in agent_result.created_events]
+    return drafts, agent_result.reply
 
 
 def plan_from_file(
@@ -54,12 +59,16 @@ def plan_from_file(
     today: date,
     client: LLMClient,
     transcriber: Transcriber,
-) -> tuple[list[PendingEvent] | None, str | None]:
-    """Transcribe, then plan. Returns (pending, None) on success,
-    (None, user-facing error) when the file is rejected or unreadable."""
+) -> tuple[list[PendingEvent] | None, str, str | None]:
+    """Transcribe, then plan.
+
+    Returns (drafts, agent_reply, error):
+      - On validation/unreadable failure: (None, "", error)
+      - On success: (drafts, agent_reply, None)
+    """
     error = _validate_file(data, mime_type)
     if error:
-        return None, error
+        return None, "", error
 
     result = transcriber.transcribe(data, mime_type)
     if not result.is_readable or not result.transcript.strip():
@@ -68,10 +77,10 @@ def plan_from_file(
             f"I couldn't read that file: {reason}. "
             "Try a clearer photo or paste the details as text."
         )
-        return None, msg
+        return None, "", msg
 
-    pending = plan_from_text(result.transcript, calendar, today, client)
-    return pending, None
+    pending, agent_reply = plan_from_text(result.transcript, calendar, today, client)
+    return pending, agent_reply, None
 
 
 def commit_pending(pending: PendingEvent, calendar: CalendarPort) -> str:
