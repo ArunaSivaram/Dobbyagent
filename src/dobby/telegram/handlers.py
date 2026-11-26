@@ -7,13 +7,16 @@ from __future__ import annotations
 
 from datetime import date, time, timedelta
 from io import BytesIO
+from typing import Any
 
 from pypdf import PdfReader
 from pypdf.errors import PdfReadError
 
 from dobby.agent import run_agent
 from dobby.calendar.base import CalendarPort, Event
+from dobby.calendar.fake import InMemoryCalendar
 from dobby.llm.base import LLMClient, Transcriber
+from dobby.telegram.session import PendingEvent
 
 UPCOMING_WINDOW_DAYS = 7
 
@@ -27,34 +30,36 @@ SUPPORTED_IMAGE_MIME: tuple[str, ...] = (
 PDF_MIME = "application/pdf"
 
 
-def handle_text(
+def plan_from_text(
     text: str,
     calendar: CalendarPort,
     today: date,
     client: LLMClient,
-) -> tuple[str, list[str]]:
-    """Run the agent on a free-text message. Returns (reply, created_event_ids)."""
-    result = run_agent(message=text, calendar=calendar, today=today, client=client)
-    ids = [e.id for e in result.created_events if e.id]
-    return result.reply, ids
+) -> list[PendingEvent]:
+    """Run the agent against a staging buffer and return pending events.
+
+    Reads go to the real calendar (so duplicate-check still works), writes
+    land in a throwaway InMemoryCalendar. Nothing is written to the real
+    calendar until the dialogue layer confirms each event.
+    """
+    staging = _StagingCalendar(real=calendar)
+    agent_result = run_agent(message=text, calendar=staging, today=today, client=client)
+    return [PendingEvent(draft=e) for e in agent_result.created_events]
 
 
-def handle_file(
+def plan_from_file(
     data: bytes,
     mime_type: str,
     calendar: CalendarPort,
     today: date,
     client: LLMClient,
     transcriber: Transcriber,
-) -> tuple[str, list[str]]:
-    """Transcribe an image or PDF, then run the agent on the transcript.
-
-    Returns (reply, created_event_ids). If the file is rejected or unreadable,
-    created_event_ids is empty and the reply explains why.
-    """
+) -> tuple[list[PendingEvent] | None, str | None]:
+    """Transcribe, then plan. Returns (pending, None) on success,
+    (None, user-facing error) when the file is rejected or unreadable."""
     error = _validate_file(data, mime_type)
     if error:
-        return error, []
+        return None, error
 
     result = transcriber.transcribe(data, mime_type)
     if not result.is_readable or not result.transcript.strip():
@@ -63,13 +68,49 @@ def handle_file(
             f"I couldn't read that file: {reason}. "
             "Try a clearer photo or paste the details as text."
         )
-        return msg, []
+        return None, msg
 
-    agent_result = run_agent(
-        message=result.transcript, calendar=calendar, today=today, client=client,
+    pending = plan_from_text(result.transcript, calendar, today, client)
+    return pending, None
+
+
+def commit_pending(pending: PendingEvent, calendar: CalendarPort) -> str:
+    """Write a user-confirmed pending event to the real calendar."""
+    start, end = pending.resolved_times()
+    created = calendar.create_event(
+        title=pending.final_title(),
+        date=pending.draft.date,
+        start_time=start,
+        end_time=end,
+        end_date=pending.draft.end_date,
+        location=pending.draft.location,
+        notes=pending.draft.notes,
     )
-    ids = [e.id for e in agent_result.created_events if e.id]
-    return agent_result.reply, ids
+    if created.id is None:
+        raise RuntimeError("calendar returned event without an id")
+    return created.id
+
+
+class _StagingCalendar:
+    """Reads go to the real calendar; writes land in a fresh InMemoryCalendar.
+
+    Lets the agent's existing duplicate-check logic (list_events on the user's
+    calendar) still work, while the actual writes are quarantined until the
+    dialogue layer commits them.
+    """
+
+    def __init__(self, real: CalendarPort) -> None:
+        self._real = real
+        self._staging = InMemoryCalendar()
+
+    def list_events(self, start_date: date, end_date: date) -> list[Event]:
+        return self._real.list_events(start_date, end_date)
+
+    def create_event(self, **kwargs: Any) -> Event:
+        return self._staging.create_event(**kwargs)
+
+    def delete_event(self, event_id: str) -> None:
+        raise NotImplementedError("agent must not delete during planning")
 
 
 def _validate_file(data: bytes, mime_type: str) -> str | None:
